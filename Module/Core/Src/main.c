@@ -47,7 +47,15 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+int x = 0 ;
+uint64_t _micros = 0;
+uint64_t TimestampEncoder = 0 ;
+uint64_t TimestampPWM = 0 ;
+uint16_t PWMPercent = 0 ;
+float EncoderVel = 0 ;
+float VelocityRPM ;
+float Degree = 0 ;
+uint8_t Direction = 0 ;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -58,7 +66,10 @@ static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-
+uint64_t micros() ;
+float EncoderVelocity_Update();
+void PWMgeneration() ;
+float Velocity() ;
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -100,12 +111,27 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+  // start PWM
+  HAL_TIM_Base_Start(&htim1);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+
+  // start micros
+  HAL_TIM_Base_Start_IT(&htim2);
+
+  // start Encoder
+  HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  VelocityRPM = Velocity() ;
+	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ;
+	  PWMgeneration() ;
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -183,7 +209,7 @@ static void MX_TIM1_Init(void)
   htim1.Init.Period = 10000;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
   {
     Error_Handler();
@@ -401,6 +427,95 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+float Velocity()
+{
+	  if (micros() - TimestampEncoder >= 100)
+	  {
+		  TimestampEncoder = micros();
+		  EncoderVel = (EncoderVel * 999 + EncoderVelocity_Update()) / 1000.0;
+	  }
+	  return EncoderVel * 60.0 / 2048.0;
+}
+void PWMgeneration()
+{
+	  if (PWMPercent > 10000)
+	  {
+		  PWMPercent = 10000 ;
+	  }
+	  if (PWMPercent < 0)
+	  {
+		  PWMPercent = 0 ;
+	  }
+	  if (micros() - TimestampPWM > 1000)//uS
+	  {
+		  x++;
+		  TimestampPWM = micros();
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, PWMPercent);
+	  }
+	  if (Direction == 0)
+	  {
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 10000);
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
+	  }
+	  if (Direction == 1)
+	  {
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 10000);
+	  }
+}
+
+#define  HTIM_ENCODER htim3
+#define  MAX_SUBPOSITION_OVERFLOW 1024
+#define  MAX_ENCODER_PERIOD 2048
+
+float EncoderVelocity_Update()
+{
+	//Save Last state
+	static uint32_t EncoderLastPosition = 0;
+	static uint64_t EncoderLastTimestamp = 0;
+
+	//read data
+	uint32_t EncoderNowPosition = HTIM_ENCODER.Instance->CNT;
+	uint64_t EncoderNowTimestamp = micros();
+
+	int32_t EncoderPositionDiff;
+	uint64_t EncoderTimeDiff;
+
+	EncoderTimeDiff = EncoderNowTimestamp - EncoderLastTimestamp;
+	EncoderPositionDiff = EncoderNowPosition - EncoderLastPosition;
+
+	//compensate overflow and underflow
+	if (EncoderPositionDiff >= MAX_SUBPOSITION_OVERFLOW)
+	{
+		EncoderPositionDiff -= MAX_ENCODER_PERIOD;
+	}
+	else if (-EncoderPositionDiff >= MAX_SUBPOSITION_OVERFLOW)
+	{
+		EncoderPositionDiff += MAX_ENCODER_PERIOD;
+	}
+
+	//Update Position and time
+	EncoderLastPosition = EncoderNowPosition;
+	EncoderLastTimestamp = EncoderNowTimestamp;
+
+	//Calculate velocity
+	//EncoderTimeDiff is in uS
+	return (EncoderPositionDiff * 1000000) / (float) EncoderTimeDiff;
+
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim == &htim2)
+	{
+		_micros += 4294967295;
+	}
+}
+uint64_t micros()
+{
+	return _micros + htim2.Instance->CNT;
+}
 
 /* USER CODE END 4 */
 
