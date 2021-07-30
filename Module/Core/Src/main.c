@@ -47,7 +47,9 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-int x = 0 ;
+float x = 0 ;
+float y = 0 ;
+uint64_t t = 0 ;
 uint64_t _micros = 0;
 uint64_t TimestampEncoder = 0 ;
 uint64_t TimestampPWM = 0 ;
@@ -437,6 +439,38 @@ static void MX_GPIO_Init(void)
 
 void PID()
 {
+//	if (x != request)
+//	{
+//		preErr1 = 0 ;
+//		preErr2 = 0 ;
+//		PreviousPWM = 0 ;
+//		HAL_Delay(100) ;
+//		y++ ;
+//	}
+//	x = request ;
+
+	if (micros() - t > 1000)
+	{
+		if (y == 0)
+		{
+			request += 0.001 ;
+			if (request >= 9)
+			{
+				y = 1 ;
+			}
+		}
+		if (y == 1)
+		{
+			request -= 0.001 ;
+			{
+				if (request <= 2)
+				{
+					y = 0 ;
+				}
+			}
+		}
+		t = micros() ;
+	}
 	float req,Vel ;
 	if (request < 0)
 	{
@@ -451,7 +485,7 @@ void PID()
 	float Error = req - Vel ;
 	if (micros() - TimestampPID >= 1000)
 	{
-		PWMPercent = (P+I+D)*Error - (P+D+D)*preErr1 + (D*preErr2) + PreviousPWM ;
+		PWMPercent = ((P+I+D)*Error) - ((P+D+D)*preErr1) + (D*preErr2) + PreviousPWM ;
 		TimestampPID = micros() ;
 		preErr2 = preErr1 ;
 		preErr1 = Error ;
