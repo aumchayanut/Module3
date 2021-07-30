@@ -51,11 +51,17 @@ int x = 0 ;
 uint64_t _micros = 0;
 uint64_t TimestampEncoder = 0 ;
 uint64_t TimestampPWM = 0 ;
+uint64_t TimestampPID = 0 ;
 uint16_t PWMPercent = 0 ;
 float EncoderVel = 0 ;
 float VelocityRPM ;
 float Degree = 0 ;
 uint8_t Direction = 0 ;
+
+float request = 0 ;
+uint16_t PreviousPWM = 0 ;
+float preErr1,preErr2,P,I,D ;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,6 +76,7 @@ uint64_t micros() ;
 float EncoderVelocity_Update();
 void PWMgeneration() ;
 float Velocity() ;
+void PID() ;
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -131,7 +138,7 @@ int main(void)
 	  VelocityRPM = Velocity() ;
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ;
 	  PWMgeneration() ;
-
+	  PID() ;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -428,6 +435,30 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void PID()
+{
+	float req,Vel ;
+	if (request < 0)
+	{
+		req = -request ;
+		Vel = - VelocityRPM ;
+	}
+	if (request >= 0)
+	{
+		req = request ;
+		Vel = VelocityRPM ;
+	}
+	float Error = req - Vel ;
+	if (micros() - TimestampPID >= 1000)
+	{
+		PWMPercent = (P+I+D)*Error - (P+D+D)*preErr1 + (D*preErr2) + PreviousPWM ;
+		TimestampPID = micros() ;
+		preErr2 = preErr1 ;
+		preErr1 = Error ;
+		PreviousPWM = PWMPercent ;
+	}
+}
+
 float Velocity()
 {
 	  if (micros() - TimestampEncoder >= 100)
@@ -439,6 +470,14 @@ float Velocity()
 }
 void PWMgeneration()
 {
+	if (request > 0)
+	{
+		Direction = 0 ;
+	}
+	if (request < 0)
+	{
+		Direction = 1 ;
+	}
 	  if (PWMPercent > 10000)
 	  {
 		  PWMPercent = 10000 ;
@@ -447,12 +486,7 @@ void PWMgeneration()
 	  {
 		  PWMPercent = 0 ;
 	  }
-	  if (micros() - TimestampPWM > 1000)//uS
-	  {
-		  x++;
-		  TimestampPWM = micros();
-		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, PWMPercent);
-	  }
+	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, PWMPercent);
 	  if (Direction == 0)
 	  {
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 10000);
@@ -462,6 +496,11 @@ void PWMgeneration()
 	  {
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 10000);
+	  }
+	  if (request == 0)
+	  {
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
 	  }
 }
 
