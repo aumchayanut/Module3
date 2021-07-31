@@ -62,8 +62,8 @@ uint8_t Direction = 0 ;
 
 float request = 0 ;
 uint16_t PreviousPWM = 0 ;
-float preErr1,preErr2,P,I,D ;
-
+float preErr1,preErr2,P,I,D,Tau,Propotional,Integrator,Differentiator,preVel ;
+float SampleTime = 0.00001 ;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -79,6 +79,8 @@ float EncoderVelocity_Update();
 void PWMgeneration() ;
 float Velocity() ;
 void PID() ;
+void PIDinit() ;
+void Trajectory();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -120,6 +122,8 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
 
+  PIDinit() ;
+
   // start PWM
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -140,13 +144,31 @@ int main(void)
 	  VelocityRPM = Velocity() ;
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ;
 	  PWMgeneration() ;
-	  PID() ;
+	  if (micros() - TimestampPID > 10)
+	  {
+		  if (request != 0)
+		  {
+			  PID() ;
+		  }
+		  TimestampPID = micros() ;
+	  }
+	  if (request == 0)
+	  {
+		  Direction = 2 ;
+	  }
+	  if (x != request)
+	  {
+		  PIDinit() ;
+	  }
+	  x = request ;
+//	  Trajectory() ;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
+
 
 /**
   * @brief System Clock Configuration
@@ -436,19 +458,8 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-void PID()
+void Trajectory()
 {
-//	if (x != request)
-//	{
-//		preErr1 = 0 ;
-//		preErr2 = 0 ;
-//		PreviousPWM = 0 ;
-//		HAL_Delay(100) ;
-//		y++ ;
-//	}
-//	x = request ;
-
 	if (micros() - t > 1000)
 	{
 		if (y == 0)
@@ -471,27 +482,81 @@ void PID()
 		}
 		t = micros() ;
 	}
+}
+
+void PIDinit()
+{
+	preErr1 = 0 ;
+	preErr2 = 0 ;
+	PreviousPWM = 0 ;
+	PWMPercent = 0 ;
+	Propotional = 0 ;
+	Integrator = 0 ;
+	Differentiator = 0 ;
+}
+
+void PID()
+{
 	float req,Vel ;
 	if (request < 0)
 	{
-		req = -request ;
+		req = - request ;
 		Vel = - VelocityRPM ;
+		Direction = 1 ;
 	}
-	if (request >= 0)
+	if (request > 0)
 	{
 		req = request ;
 		Vel = VelocityRPM ;
+		Direction = 0 ;
 	}
-	float Error = req - Vel ;
-	if (micros() - TimestampPID >= 1000)
+	float error = req - Vel ;
+	Propotional = P * error ;
+	Integrator = Integrator + (0.5 * I * SampleTime * (error + preErr1)) ;
+
+	//********Anti Windup*************
+	float maxInt,minInt ;
+	if (Propotional < 10000)
 	{
-		PWMPercent = ((P+I+D)*Error) - ((P+D+D)*preErr1) + (D*preErr2) + PreviousPWM ;
-		TimestampPID = micros() ;
-		preErr2 = preErr1 ;
-		preErr1 = Error ;
-		PreviousPWM = PWMPercent ;
+		maxInt = 10000 - Propotional ;
 	}
+	else
+	{
+		maxInt = 0 ;
+	}
+	if (Propotional > 0)
+	{
+		minInt = 0 - Propotional ;
+	}
+	else
+	{
+		minInt = 0 ;
+	}
+	//********************************
+	if (Integrator > maxInt)
+	{
+		Integrator = maxInt ;
+	}
+	else if (Integrator < minInt)
+	{
+		Integrator = minInt ;
+	}
+
+	Differentiator = (2*D*(VelocityRPM - preVel)) + (Differentiator * (2*Tau - SampleTime)) / (2 * Tau + SampleTime) ;
+
+	PWMPercent = Propotional + Integrator + Differentiator ;
+	if (PWMPercent > 10000)
+	{
+		PWMPercent = 10000 ;
+	}
+	if (PWMPercent < 0)
+	{
+		PWMPercent = 0 ;
+	}
+	preErr1 = error ;
+	preVel = Vel ;
 }
+
 
 float Velocity()
 {
@@ -504,23 +569,6 @@ float Velocity()
 }
 void PWMgeneration()
 {
-	if (request > 0)
-	{
-		Direction = 0 ;
-	}
-	if (request < 0)
-	{
-		Direction = 1 ;
-	}
-	  if (PWMPercent > 10000)
-	  {
-		  PWMPercent = 10000 ;
-	  }
-	  if (PWMPercent < 0)
-	  {
-		  PWMPercent = 0 ;
-	  }
-	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, PWMPercent);
 	  if (Direction == 0)
 	  {
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 10000);
@@ -531,11 +579,14 @@ void PWMgeneration()
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 10000);
 	  }
-	  if (request == 0)
+	  if (Direction == 2)
 	  {
+		  PIDinit() ;
+		  PWMPercent = 0 ;
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
 	  }
+	  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, PWMPercent);
 }
 
 #define  HTIM_ENCODER htim3
