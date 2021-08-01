@@ -59,6 +59,10 @@ float EncoderVel = 0 ;
 float VelocityRPM ;
 float Degree = 0 ;
 uint8_t Direction = 0 ;
+uint8_t SetHomeBuffer[2] = {0} ;
+uint8_t SetHomeFlag = 0 ;
+uint8_t Set ;
+static uint16_t Home,Now ;
 
 float request = 0 ;
 uint16_t PreviousPWM = 0 ;
@@ -81,6 +85,7 @@ float Velocity() ;
 void PID() ;
 void PIDinit() ;
 void Trajectory();
+void SetHome() ;
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -144,23 +149,25 @@ int main(void)
 	  VelocityRPM = Velocity() ;
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ;
 	  PWMgeneration() ;
-	  if (micros() - TimestampPID > 10)
-	  {
-		  if (request != 0)
-		  {
-			  PID() ;
-		  }
-		  TimestampPID = micros() ;
-	  }
-	  if (request == 0)
-	  {
-		  Direction = 2 ;
-	  }
-	  if (x != request)
-	  {
-		  PIDinit() ;
-	  }
-	  x = request ;
+	  SetHome() ;
+	  Set = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0) ;
+//	  if (micros() - TimestampPID > 10)
+//	  {
+//		  if (request != 0)
+//		  {
+//			  PID() ;
+//		  }
+//		  TimestampPID = micros() ;
+//	  }
+//	  if (request == 0)
+//	  {
+//		  Direction = 2 ;
+//	  }
+//	  if (x != request)
+//	  {
+//		  PIDinit() ;
+//	  }
+//	  x = request ;
 //	  Trajectory() ;
     /* USER CODE END WHILE */
 
@@ -168,7 +175,6 @@ int main(void)
   }
   /* USER CODE END 3 */
 }
-
 
 /**
   * @brief System Clock Configuration
@@ -448,6 +454,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : Home_Pin */
+  GPIO_InitStruct.Pin = Home_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(Home_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -458,6 +470,44 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void SetHome()
+{
+	if (SetHomeFlag == 0)
+	{
+		Direction = 0 ;
+		PWMPercent = 7800 ;
+	}
+	Now = htim3.Instance->CNT ;
+	if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0))
+	{
+		Home = htim3.Instance->CNT ;
+		SetHomeFlag = 1 ;
+	}
+
+	if (SetHomeFlag == 1)
+	{
+		if (Now > Home)
+		{
+			Direction = 0 ;
+			PWMPercent = 6000 ;
+		}
+		if (Now < Home)
+		{
+			 y += 1 ;
+			Direction = 1 ;
+			PWMPercent = 6000 ;
+		}
+		if (Home == Now)
+		{
+			x += 1 ;
+			Direction = 2 ;
+			PWMPercent = 0 ;
+		}
+	}
+
+
+}
 void Trajectory()
 {
 	if (micros() - t > 1000)
