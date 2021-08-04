@@ -60,8 +60,10 @@ float VelocityRPM ;
 float Degree = 0 ;
 uint8_t Direction = 0 ;
 uint8_t SetHomeBuffer[2] = {0} ;
+uint8_t ButtonBuffer[2] = {0} ;
 uint8_t SetHomeFlag = 0 ;
 uint8_t Set ;
+uint8_t StartSetHome = 0 ;
 static uint16_t Home,Now ;
 
 float request = 0 ;
@@ -149,25 +151,35 @@ int main(void)
 	  VelocityRPM = Velocity() ;
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ;
 	  PWMgeneration() ;
-	  SetHome() ;
 	  Set = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0) ;
-//	  if (micros() - TimestampPID > 10)
-//	  {
-//		  if (request != 0)
-//		  {
-//			  PID() ;
-//		  }
-//		  TimestampPID = micros() ;
-//	  }
-//	  if (request == 0)
-//	  {
-//		  Direction = 2 ;
-//	  }
-//	  if (x != request)
-//	  {
-//		  PIDinit() ;
-//	  }
-//	  x = request ;
+	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ;
+	  if (ButtonBuffer[0] && !ButtonBuffer[1])
+	  {
+		  StartSetHome = 1 ;
+		  SetHomeFlag = 0 ;
+	  }
+	  if (StartSetHome == 1)
+	  {
+		  SetHome() ;
+	  }
+	  ButtonBuffer[1] = ButtonBuffer[0] ;
+	  if (micros() - TimestampPID > 1000)
+	  {
+		  if (request != 0)
+		  {
+			  PID() ;
+		  }
+		  TimestampPID = micros() ;
+	  }
+	  if (request == 0)
+	  {
+		  Direction = 2 ;
+	  }
+	  if (x != request)
+	  {
+		  PIDinit() ;
+	  }
+	  x = request ;
 //	  Trajectory() ;
     /* USER CODE END WHILE */
 
@@ -243,7 +255,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 10000;
+  htim1.Init.Period = 1000;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -476,7 +488,7 @@ void SetHome()
 	if (SetHomeFlag == 0)
 	{
 		Direction = 0 ;
-		PWMPercent = 7800 ;
+		request = 5 ;
 	}
 	Now = htim3.Instance->CNT ;
 	if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0))
@@ -490,19 +502,18 @@ void SetHome()
 		if (Now > Home)
 		{
 			Direction = 0 ;
-			PWMPercent = 6000 ;
+			request = 1 ;
 		}
 		if (Now < Home)
 		{
-			 y += 1 ;
 			Direction = 1 ;
-			PWMPercent = 6000 ;
+			request = 1 ;
 		}
 		if (Home == Now)
 		{
-			x += 1 ;
 			Direction = 2 ;
-			PWMPercent = 0 ;
+			request = 0 ;
+			StartSetHome = 0 ;
 		}
 	}
 
@@ -566,9 +577,9 @@ void PID()
 
 	//********Anti Windup*************
 	float maxInt,minInt ;
-	if (Propotional < 10000)
+	if (Propotional < 1000)
 	{
-		maxInt = 10000 - Propotional ;
+		maxInt = 1000 - Propotional ;
 	}
 	else
 	{
@@ -595,9 +606,9 @@ void PID()
 	Differentiator = (2*D*(VelocityRPM - preVel)) + (Differentiator * (2*Tau - SampleTime)) / (2 * Tau + SampleTime) ;
 
 	PWMPercent = Propotional + Integrator + Differentiator ;
-	if (PWMPercent > 10000)
+	if (PWMPercent > 1000)
 	{
-		PWMPercent = 10000 ;
+		PWMPercent = 1000 ;
 	}
 	if (PWMPercent < 0)
 	{
@@ -621,13 +632,13 @@ void PWMgeneration()
 {
 	  if (Direction == 0)
 	  {
-		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 10000);
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 1000);
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
 	  }
 	  if (Direction == 1)
 	  {
 		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
-		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 10000);
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 1000);
 	  }
 	  if (Direction == 2)
 	  {
