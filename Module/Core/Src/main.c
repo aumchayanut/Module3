@@ -58,6 +58,7 @@ uint16_t PWMPercent = 0 ;
 float EncoderVel = 0 ;
 float VelocityRPM ;
 float Degree = 0 ;
+float StartPos,FinalPos ;
 uint8_t Direction = 0 ;
 uint8_t SetHomeBuffer[2] = {0} ;
 uint8_t ButtonBuffer[2] = {0} ;
@@ -526,26 +527,27 @@ void SetHome()
 }
 void Trajectory()
 {
+	StartPos = Degree*3.14159/180 ;
+	float Qi = StartPos ;
+	float Qf = FinalPos ;
+	float DeltaTime ;
+	float a0 = Qi ;
+	float a1 = 0 ;
+	float a2 = 0 ;
+	float a3 = (1/(2*DeltaTime^3))*(20(Qf-Qi)) ;
+	float a4 = (1/(2*DeltaTime^4))*(30(Qi-Qf)) ;
+	float a5 = (1/(2*DeltaTime^5))*(12(Qf-Qi)) ;
+	float StartTime ;
+	uint8_t ST = 0 ;
 	if (micros() - t > 1000)
 	{
-		if (y == 0)
+		if (ST == 0)
 		{
-			request += 0.001 ;
-			if (request >= 9)
-			{
-				y = 1 ;
-			}
+			StartTime = micros() ;
+			ST = 1 ;
 		}
-		if (y == 1)
-		{
-			request -= 0.001 ;
-			{
-				if (request <= 2)
-				{
-					y = 0 ;
-				}
-			}
-		}
+		float t = micros() - StartTime ;
+		request = t + (2*a2*t) + (3*a3*t^2) + (4*a4*t^3) + (5*a5*t^4) ;
 		t = micros() ;
 	}
 }
