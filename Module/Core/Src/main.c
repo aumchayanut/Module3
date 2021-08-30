@@ -32,6 +32,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define End_Eff 0x23
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -40,6 +41,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+I2C_HandleTypeDef hi2c1;
+
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
@@ -55,6 +58,7 @@ uint64_t TimestampEncoder = 0 ;
 uint64_t TimestampPWM = 0 ;
 uint64_t TimestampPID = 0 ;
 uint16_t PWMPercent = 0 ;
+uint16_t EndEffStatus = 0 ;
 float EncoderVel = 0 ;
 float VelocityRPM ;
 float Degree = 0 ;
@@ -85,6 +89,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 uint64_t micros() ;
 float EncoderVelocity_Update();
@@ -94,6 +99,8 @@ void PID() ;
 void PIDinit() ;
 void Trajectory();
 void SetHome() ;
+void EndEffWrite() ;
+void EndEffRead() ;
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -133,6 +140,7 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
   PIDinit() ;
@@ -154,21 +162,24 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  EndEffRead() ;
 	  VelocityRPM = Velocity() ;
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ;
 	  PWMgeneration() ;
 //	  Set = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0) ;
-//	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ;
-//	  if (ButtonBuffer[0] && !ButtonBuffer[1])
-//	  {
+	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ;
+	  if (ButtonBuffer[0] && !ButtonBuffer[1])
+	  {
+		  EndEffWrite() ;
+		  y = y+1 ;
 //		  StartSetHome = 1 ;
 //		  SetHomeFlag = 0 ;
-//	  }
+	  }
 //	  if (StartSetHome == 1)
 //	  {
 //		  SetHome() ;
 //	  }
-//	  ButtonBuffer[1] = ButtonBuffer[0] ;
+	  ButtonBuffer[1] = ButtonBuffer[0] ;
 	  if (micros() - TimestampPID > 1000)
 	  {
 		  if (request != 0)
@@ -236,6 +247,40 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.ClockSpeed = 400000;
+  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
@@ -488,7 +533,20 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void EndEffRead()
+{
+	HAL_I2C_Master_Receive_IT(&hi2c1, End_Eff, EndEffStatus, 1) ;
+}
+void EndEffWrite()
+{
+	if (HAL_I2C_STATE_READY)
+	{
+		HAL_I2C_Master_Transmit_IT(&hi2c1, End_Eff, 0x45, 1) ;
+		HAL_I2C_Master_Transmit_IT(&hi2c1, End_Eff, 0x23, 1) ;
+//		HAL_I2C_Master_Transmit_IT(&hi2c1, End_Eff, 0x56, 2) ;
+	}
 
+}
 void SetHome()
 {
 	if (SetHomeFlag == 0)
@@ -525,32 +583,32 @@ void SetHome()
 
 
 }
-void Trajectory()
-{
-	StartPos = Degree*3.14159/180 ;
-	float Qi = StartPos ;
-	float Qf = FinalPos ;
-	float DeltaTime ;
-	float a0 = Qi ;
-	float a1 = 0 ;
-	float a2 = 0 ;
-	float a3 = (1/(2*DeltaTime^3))*(20(Qf-Qi)) ;
-	float a4 = (1/(2*DeltaTime^4))*(30(Qi-Qf)) ;
-	float a5 = (1/(2*DeltaTime^5))*(12(Qf-Qi)) ;
-	float StartTime ;
-	uint8_t ST = 0 ;
-	if (micros() - t > 1000)
-	{
-		if (ST == 0)
-		{
-			StartTime = micros() ;
-			ST = 1 ;
-		}
-		float t = micros() - StartTime ;
-		request = t + (2*a2*t) + (3*a3*t^2) + (4*a4*t^3) + (5*a5*t^4) ;
-		t = micros() ;
-	}
-}
+//void Trajectory()
+//{
+//	StartPos = Degree*3.14159/180 ;
+//	float Qi = StartPos ;
+//	float Qf = FinalPos ;
+//	float DeltaTime ;
+//	float a0 = Qi ;
+//	float a1 = 0 ;
+//	float a2 = 0 ;
+//	float a3 = (1/(2*DeltaTime^3))*(20(Qf-Qi)) ;
+//	float a4 = (1/(2*DeltaTime^4))*(30(Qi-Qf)) ;
+//	float a5 = (1/(2*DeltaTime^5))*(12(Qf-Qi)) ;
+//	float StartTime ;
+//	uint8_t ST = 0 ;
+//	if (micros() - t > 1000)
+//	{
+//		if (ST == 0)
+//		{
+//			StartTime = micros() ;
+//			ST = 1 ;
+//		}
+//		float t = micros() - StartTime ;
+//		request = t + (2*a2*t) + (3*a3*t^2) + (4*a4*t^3) + (5*a5*t^4) ;
+//		t = micros() ;
+//	}
+//}
 
 void PIDinit()
 {
