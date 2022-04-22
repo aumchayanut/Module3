@@ -54,40 +54,53 @@ DMA_HandleTypeDef hdma_usart2_tx;
 /* USER CODE BEGIN PV */
 
 //UART
-//typedef struct _UartStructure
-//{
-//	UART_HandleTypeDef *huart;
-//	uint16_t TxLen, RxLen;
-//	uint8_t *TxBuffer;
-//	uint16_t TxTail, TxHead;
-//	uint8_t *RxBuffer;
-//	uint16_t RxTail; //RXHeadUseDMA
-//
-//} UARTStucrture;
-//
-//UARTStucrture UART2 =
-//{ 0 };
-//
-//uint8_t MainMemory[255] =
-//{ 0 };
-//static uint8_t parameter[256] =
-//{ 0 };
-//
-//typedef enum
-//{
-//	DNMXP_idle,
-//	DNMXP_1stHeader,
-//	DNMXP_2ndHeader,
-//	DNMXP_3rdHeader,
-//	DNMXP_Reserved,
-//	DNMXP_ID,
-//	DNMXP_LEN1,
-//	DNMXP_LEN2,
-//	DNMXP_Inst,
-//	DNMXP_ParameterCollect,
-//	DNMXP_CRCAndExecute
-//
-//} UARTState;
+typedef struct _UartStructure
+{
+	UART_HandleTypeDef *huart;
+	uint16_t TxLen, RxLen;
+	uint8_t *TxBuffer;
+	uint16_t TxTail, TxHead;
+	uint8_t *RxBuffer;
+	uint16_t RxTail; //RXHeadUseDMA
+
+} UARTStucrture;
+
+UARTStucrture UART2 =
+{ 0 };
+
+uint8_t MainMemory[255] =
+{ 0 };
+static uint8_t parameter[256] =
+{ 0 };
+
+typedef enum
+{
+	Idle,
+	Start,
+	Frame1,
+	Frame2,
+	Frame3,
+//	Mode1,
+//	Mode2,
+//	Mode3,
+//	Mode4,
+//	Mode5,
+//	Mode6,
+//	Mode7,
+//	Mode8,
+//	Mode9,
+//	Mode10,
+//	Mode11,
+//	Mode12,
+//	Mode13,
+//	Mode14,
+	CS
+
+} UARTState;
+uint8_t Mode = 0;
+uint8_t Frame = 0;
+uint8_t n_Station = 0;
+uint16_t Station[10] = {0};
 
 
 //PID
@@ -124,6 +137,7 @@ uint8_t SetHomeFlag = 0 ; //Status set home - 1 working
 uint8_t StartSetHome = 0 ; //Set home trigger
 uint8_t sum;
 uint64_t SetHomeTimeStamp = 0;
+uint8_t home = 0;
 
 
 //Read Encoder
@@ -139,7 +153,8 @@ float VelocityRPM ; //velocity RPM unit
 float Degree = 0 ; //Position Degree unit
 uint8_t Direction = 0 ; //0 CW - 1 CCW - 2 Stop
 uint8_t ButtonBuffer[2] = {0} ; //Blue button
-
+uint64_t pidtuner = 0;
+uint8_t StartTune = 0;
 
 float x = 0 ; // request changed
 
@@ -166,10 +181,23 @@ void PWMgeneration() ;
 float Velocity() ;
 void PID() ;
 void PIDinit() ;
-void FirstTraj();
+void Trajec();
 void SetHome() ;
 void EndEffWrite() ;
 void GoToGoal(float goal);
+
+//UART Function
+void UARTInit(UARTStucrture *uart);
+void UARTResetStart(UARTStucrture *uart);
+uint32_t UARTGetRxHead(UARTStucrture *uart);
+int16_t UARTReadChar(UARTStucrture *uart);
+void UARTTxDumpBuffer(UARTStucrture *uart);
+void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len);
+void Protocal(int16_t dataIn, UARTStucrture *uart);
+uint16_t CheckSum(uint8_t Mode, uint8_t Frame, uint16_t Data);
+
+
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -211,6 +239,11 @@ int main(void)
   MX_TIM3_Init();
   MX_DMA_Init();
   MX_I2C1_Init();
+	UART2.huart = &huart2;
+	UART2.RxLen = 255;
+	UART2.TxLen = 255;
+	UARTInit(&UART2);
+	UARTResetStart(&UART2);
   /* USER CODE BEGIN 2 */
 
 //	UART2.huart = &huart2;
@@ -245,6 +278,7 @@ int main(void)
 	  VelocityRPM = Velocity() ; //rpm unit
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ; //Degree unit
 	  PWMgeneration() ; //Gen PWM
+	  home = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
 	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ; // Read Blue button
 //**************************************************************************************
 //**********Blue Button Push*********************
@@ -277,8 +311,26 @@ int main(void)
 		  TimestampPID = micros() ;
 	  }
 //************************************************
+//**************UART******************************
+	  int16_t inputChar = UARTReadChar(&UART2);
+	  if (inputChar != -1)
+	  {
+		  Protocal(inputChar, &UART2);
+	  }
 
-
+//	  if (micros()-pidtuner > 5000000)
+//	  {
+//		  StartTune = !StartTune;
+//	  }
+//
+//	  if (StartTune)
+//	  {
+//		  request = 5;
+//	  }
+//	  else
+//	  {
+//		  request = 0;
+//	  }
 
 //********other**************
 	  if (request == 0)
@@ -286,16 +338,6 @@ int main(void)
 		  Direction = 2 ;
 	  }
 //****************************
-
-
-//	  if (x != request) //Change request
-//	  {
-//		  PIDinit() ;
-//		  StartMoving = 1 ;
-//	  }
-//
-//	  x = request ; //save previous request
-
 	  if (StartMoving == 0)
 	  {
 		  T = 0;
@@ -305,7 +347,7 @@ int main(void)
 	  }
 	  if (StartMoving == 1)
 	  {
-		  FirstTraj();
+		  Trajec();
 	  }
 
     /* USER CODE END WHILE */
@@ -668,9 +710,385 @@ void EndEffWrite()
 	}
 
 }
-void GoToGoal(float goal)
-{
+//void GoToGoal(float goal)
+//{
+//
+//}
 
+void UARTInit(UARTStucrture *uart)
+{
+	//dynamic memory allocate
+	uart->RxBuffer = (uint8_t*) calloc(sizeof(uint8_t), UART2.RxLen);
+	uart->TxBuffer = (uint8_t*) calloc(sizeof(uint8_t), UART2.TxLen);
+	uart->RxTail = 0;
+	uart->TxTail = 0;
+	uart->TxHead = 0;
+}
+void UARTResetStart(UARTStucrture *uart)
+{
+	HAL_UART_Receive_DMA(uart->huart, uart->RxBuffer, uart->RxLen);
+}
+uint32_t UARTGetRxHead(UARTStucrture *uart)
+{
+	return uart->RxLen - __HAL_DMA_GET_COUNTER(uart->huart->hdmarx);
+}
+int16_t UARTReadChar(UARTStucrture *uart)
+{
+	int16_t Result = -1; // -1 Mean no new data
+
+	//check Buffer Position
+	if (uart->RxTail != UARTGetRxHead(uart))
+	{
+		//get data from buffer
+		Result = uart->RxBuffer[uart->RxTail];
+		uart->RxTail = (uart->RxTail + 1) % uart->RxLen;
+
+	}
+	return Result;
+
+}
+void UARTTxDumpBuffer(UARTStucrture *uart)
+{
+	static uint8_t MultiProcessBlocker = 0;
+
+	if (uart->huart->gState == HAL_UART_STATE_READY && !MultiProcessBlocker)
+	{
+		MultiProcessBlocker = 1;
+
+		if (uart->TxHead != uart->TxTail)
+		{
+			//find len of data in buffer (Circular buffer but do in one way)
+			uint16_t sentingLen =
+					uart->TxHead > uart->TxTail ?
+							uart->TxHead - uart->TxTail :
+							uart->TxLen - uart->TxTail;
+
+			//sent data via DMA
+			HAL_UART_Transmit_DMA(uart->huart, &(uart->TxBuffer[uart->TxTail]),
+					sentingLen);
+			//move tail to new position
+			uart->TxTail = (uart->TxTail + sentingLen) % uart->TxLen;
+
+		}
+		MultiProcessBlocker = 0;
+	}
+
+}
+void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len)
+{
+	//check data len is more than buffer?
+	uint16_t lenAddBuffer = (len <= uart->TxLen) ? len : uart->TxLen;
+
+	// find number of data before end of ring buffer
+	uint16_t numberOfdataCanCopy =
+			lenAddBuffer <= uart->TxLen - uart->TxHead ?
+					lenAddBuffer : uart->TxLen - uart->TxHead;
+	//copy data to the buffer
+	memcpy(&(uart->TxBuffer[uart->TxHead]), pData, numberOfdataCanCopy);
+
+	//Move Head to new position
+
+	uart->TxHead = (uart->TxHead + lenAddBuffer) % uart->TxLen;
+	//Check that we copy all data That We can?
+	if (lenAddBuffer != numberOfdataCanCopy)
+	{
+		memcpy(uart->TxBuffer, &(pData[numberOfdataCanCopy]),
+				lenAddBuffer - numberOfdataCanCopy);
+	}
+	UARTTxDumpBuffer(uart);
+}
+void Protocal(int16_t dataIn,UARTStucrture *uart)
+{
+	//all Static Variable
+	static UARTState State = Idle;
+	uint8_t StartBit = 0b1001;
+//	static uint16_t datalen = 0;
+	static uint16_t CollectedData = 0;
+//	static uint8_t inst = 0;
+//
+//	static uint16_t CRCCheck = 0;
+//	static uint16_t packetSize = 0;
+//	static uint16_t CRC_accum;
+
+//	//State Machine
+////	switch (State)
+////	{
+////	case Idle:
+////		if (dataIn&0xf0 == 1001)
+////			Mode = dataIn&0xf;
+////			if (Mode == 0b0001)
+////			{
+////				Mode = 1;
+////				Frame = 2;
+////			}
+////			if (Mode == 0b0010)
+////			{
+////				Mode = 2;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b0011)
+////			{
+////				Mode = 3;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b0100)
+////			{
+////				Mode = 4;
+////				Frame = 2;
+////			}
+////			if (Mode == 0b0101)
+////			{
+////				Mode = 5;
+////				Frame = 2;
+////			}
+////			if (Mode == 0b0110)
+////			{
+////				Mode = 6;
+////				Frame = 2;
+////			}
+////			if (Mode == 0b0111)
+////			{
+////				Mode = 7;
+////				Frame = 3;
+////			}
+////			if (Mode == 0b1000)
+////			{
+////				Mode = 8;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b1001)
+////			{
+////				Mode = 9;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b1010)
+////			{
+////				Mode = 10;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b1011)
+////			{
+////				Mode = 11;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b1100)
+////			{
+////				Mode = 12;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b1101)
+////			{
+////				Mode = 13;
+////				Frame = 1;
+////			}
+////			if (Mode == 0b1110)
+////			{
+////				Mode = 14;
+////				Frame = 1;
+////			}
+////			if (Frame == 1)
+////			{
+////				State = Frame1;
+////			}
+////			if (Frame == 2)
+////			{
+////				State = Frame2;
+////			}
+////			if (Frame == 3)
+////			{
+////				State = Frame3;
+////			}
+////		break;
+////	case Frame1:
+////			if (dataIn == CheckSum(Mode, Frame, CollectedData))
+////			{
+////
+////			}
+////		break;
+//	case DNMXP_2ndHeader:
+//		if (dataIn == 0xFD)
+//			State = DNMXP_3rdHeader;
+//		else if (dataIn == 0xFF)
+//			; //do nothing
+//		else
+//			State = DNMXP_idle;
+//		break;
+//	case DNMXP_3rdHeader:
+//		if (dataIn == 0x00)
+//			State = DNMXP_Reserved;
+//		else
+//			State = DNMXP_idle;
+//		break;
+//	case DNMXP_Reserved:
+//		if ((dataIn == MotorID) | (dataIn == 0xFE))
+//			State = DNMXP_ID;
+//		else
+//			State = DNMXP_idle;
+//		break;
+//	case DNMXP_ID:
+//		datalen = dataIn & 0xFF;
+//		State = DNMXP_LEN1;
+//		break;
+//	case DNMXP_LEN1:
+//		datalen |= (dataIn & 0xFF) << 8;
+//		State = DNMXP_LEN2;
+//		break;
+//	case DNMXP_LEN2:
+//		inst = dataIn;
+//		State = DNMXP_Inst;
+//		break;
+//	case DNMXP_Inst:
+//		if (datalen > 3)
+//		{
+//			parameter[0] = dataIn;
+//			CollectedData = 1; //inst 1 + para[0] 1
+//			State = DNMXP_ParameterCollect;
+//		}
+//		else
+//		{
+//			CRCCheck = dataIn & 0xff;
+//			State = DNMXP_CRCAndExecute;
+//		}
+//
+//		break;
+//	case DNMXP_ParameterCollect:
+//
+//		if (datalen-3 > CollectedData)
+//		{
+//			parameter[CollectedData] = dataIn;
+//			CollectedData++;
+//		}
+//		else
+//		{
+//			CRCCheck = dataIn & 0xff;
+//			State = DNMXP_CRCAndExecute;
+//		}
+//		break;
+//	case DNMXP_CRCAndExecute:
+//		CRCCheck |= (dataIn & 0xff) << 8;
+//		//Check CRC
+//		CRC_accum = 0;
+//		packetSize = datalen + 7;
+//		//check overlapse buffer
+//		if (uart->RxTail - packetSize >= 0) //not overlapse
+//		{
+//			CRC_accum = update_crc(CRC_accum,
+//					&(uart->RxBuffer[uart->RxTail - packetSize]),
+//					packetSize - 2);
+//		}
+//		else//overlapse
+//		{
+//			uint16_t firstPartStart = uart->RxTail - packetSize + uart->RxLen;
+//			CRC_accum = update_crc(CRC_accum, &(uart->RxBuffer[firstPartStart]),
+//					uart->RxLen - firstPartStart);
+//			CRC_accum = update_crc(CRC_accum, uart->RxBuffer, uart->RxTail - 2);
+//
+//		}
+//
+//		if (CRC_accum == CRCCheck)
+//		{
+//			switch (inst)
+//			{
+//			case 0x01:// ping
+//			{
+//				//create packet template
+//				uint8_t temp[] =
+//				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x04, 0x00, 0x55,0x00, 0x00, 0x00};
+//				//config MotorID
+//				temp[4] = MotorID;
+//				//calcuate CRC
+//				uint16_t crc_calc = update_crc(0, temp, 9);
+//				temp[9] = crc_calc & 0xff;
+//				temp[10] = (crc_calc >> 8) & 0xFF;
+//				//Sent Response Packet
+//				UARTTxWrite(uart, temp, 11);
+//				break;
+//			}
+//
+//			case 0x02://READ
+//			{
+//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
+//				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF);
+//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
+//				temp[4] = MotorID;
+//				temp[5] = (numberOfDataToRead + 4) & 0xff ; // +inst+err+crc1+crc2
+//				temp[6] = ((numberOfDataToRead + 4)>>8) & 0xff ;
+//				uint16_t crc_calc = update_crc(0, temp, 9);
+//				crc_calc = update_crc(crc_calc ,&(Memory[startAddr]),numberOfDataToRead);
+//				uint8_t crctemp[2];
+//				crctemp[0] = crc_calc&0xff;
+//				crctemp[1] = (crc_calc>>8)&0xff;
+//				UARTTxWrite(uart, temp,9);
+//				UARTTxWrite(uart, &(Memory[startAddr]),numberOfDataToRead);
+//				UARTTxWrite(uart, crctemp,2);
+//				break;
+//			}
+//			case 0x03://WRITE
+//			{
+//				//LAB
+//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
+//				uint16_t ParameterNumber = datalen - 5 ;
+//				for (int i = 0; i < ParameterNumber-1; i++)
+//				{
+//					Memory[startAddr + i] = parameter[i+1] ;
+//				}
+//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00};
+//				temp[4] = MotorID ;
+//				uint16_t crc_calc = update_crc(0, temp, 9);
+//				uint8_t crctemp[2];
+//				crctemp[0] = crc_calc&0xff;
+//				crctemp[1] = (crc_calc>>8)&0xff;
+//				UARTTxWrite(uart, temp,9);
+//				UARTTxWrite(uart, crctemp,2);
+//
+//			}
+////			default: //Unknown Inst
+////			{
+////				uint8_t temp[] =
+////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x02, 0x00,
+////						0x00 };
+////				temp[4] = MotorID;
+////				uint16_t crc_calc = update_crc(0, temp, 9);
+////				temp[9] = crc_calc & 0xff;
+////				temp[10] = (crc_calc >> 8) & 0xFF;
+////				UARTTxWrite(uart, temp, 11);
+////
+////				break;
+////			}
+//			}
+//		}
+//		else //crc error
+//		{
+//			uint8_t temp[] =
+//			{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x03, 0x00, 0x00 };
+//			temp[4] = MotorID;
+//			uint16_t crc_calc = update_crc(0, temp, 9);
+//			temp[9] = crc_calc & 0xff;
+//			temp[10] = (crc_calc >> 8) & 0xFF;
+//			UARTTxWrite(uart, temp, 11);
+//		}
+//		State = DNMXP_idle;
+//		break;
+	}
+}
+
+uint16_t CheckSum(uint8_t Mode, uint8_t Frame, uint16_t Data)
+{
+	uint8_t Start = 0b1001;
+	uint16_t result = 0;
+	if (Frame == 1)
+	{
+		result = ~((Start<<4)|Mode);
+	}
+	if (Frame == 2)
+	{
+		result = ~(((Start<<4)|Mode)+Data);
+	}
+	if (Frame == 3)
+	{
+		result = ~(((Start<<4)|Mode)+Data);
+	}
+	return result;
 }
 void SetHome()
 {
@@ -700,6 +1118,7 @@ void SetHome()
 		if (sum > 0)
 		{
 			request = 0;
+			htim3.Instance->CNT = 0;
 			SetHomeFlag = 3;
 		}
 	}
@@ -709,7 +1128,7 @@ void SetHome()
 }
 
 
-void FirstTraj()
+void Trajec()
 {
 	float Vmax = 10 ; //rpm
 	Vmax = Vmax * 0.10472 ; //rad per sec
