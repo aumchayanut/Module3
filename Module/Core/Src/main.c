@@ -239,18 +239,13 @@ int main(void)
   MX_TIM3_Init();
   MX_DMA_Init();
   MX_I2C1_Init();
+  /* USER CODE BEGIN 2 */
+
 	UART2.huart = &huart2;
 	UART2.RxLen = 255;
 	UART2.TxLen = 255;
 	UARTInit(&UART2);
 	UARTResetStart(&UART2);
-  /* USER CODE BEGIN 2 */
-
-//	UART2.huart = &huart2;
-//	UART2.RxLen = 255;
-//	UART2.TxLen = 255;
-//	UARTInit(&UART2);
-//	UARTResetStart(&UART2);
 
 
   PIDinit() ;
@@ -284,13 +279,17 @@ int main(void)
 //**********Blue Button Push*********************
 	  if (!ButtonBuffer[0] && ButtonBuffer[1])
 	  {
-//		  EndEffWrite() ;
-//		  z = 1 ;
+		  EndEffWrite() ;
+//		  x += 1 ;
+//		  x = 1 ;
 		  StartSetHome = 1 ; //Set home trigger
 		  SetHomeFlag = 0;
-//		  SetHomeFlag = 0 ;
 	  }
 	  ButtonBuffer[1] = ButtonBuffer[0] ;
+//	  if (x)
+//	  {
+//		  EndEffWrite();
+//	  }
 //************************************************
 //**********Set Home******************************
 	  if (StartSetHome == 1)
@@ -315,7 +314,10 @@ int main(void)
 	  int16_t inputChar = UARTReadChar(&UART2);
 	  if (inputChar != -1)
 	  {
-		  Protocal(inputChar, &UART2);
+//		  Protocal(inputChar, &UART2);
+//		  char temp[32];
+//		  sprintf(temp, "Recived [%d]\r\n", inputChar);
+//		  UARTTxWrite(&UART2, (uint8_t*) temp, strlen(temp));
 	  }
 
 //	  if (micros()-pidtuner > 5000000)
@@ -417,7 +419,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 1000;
+  hi2c1.Init.ClockSpeed = 100000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -704,9 +706,12 @@ void EndEffWrite()
 {
 	if (hi2c1.State == HAL_I2C_STATE_READY)
 	{
-//		HAL_Delay(500);
-//		HAL_I2C_Master_Transmit(&hi2c1, 0x23 << 1, 0x45, 1	, 1000); //Write eff
-		HAL_I2C_Master_Transmit_IT(&hi2c1, 0x23<<1, 0x45, 1);
+		HAL_Delay(500);
+		uint8_t temp = 0x45;
+		uint8_t add = 0x23;
+		HAL_I2C_Master_Transmit(&hi2c1, add << 1, &temp, 1, 1000); //Write eff
+		x+=1;
+//		HAL_I2C_Master_Transmit_IT(&hi2c1, 0x23<<1, 0x45, 1);
 	}
 
 }
@@ -797,20 +802,20 @@ void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len)
 	}
 	UARTTxDumpBuffer(uart);
 }
-void Protocal(int16_t dataIn,UARTStucrture *uart)
-{
-	//all Static Variable
-	static UARTState State = Idle;
-	uint8_t StartBit = 0b1001;
-//	static uint16_t datalen = 0;
-	static uint16_t CollectedData = 0;
-//	static uint8_t inst = 0;
+//void Protocal(int16_t dataIn,UARTStucrture *uart)
+//{
+//	//all Static Variable
+//	static UARTState State = Idle;
+//	uint8_t StartBit = 0b1001;
+////	static uint16_t datalen = 0;
+//	static uint16_t CollectedData = 0;
+////	static uint8_t inst = 0;
+////
+////	static uint16_t CRCCheck = 0;
+////	static uint16_t packetSize = 0;
+////	static uint16_t CRC_accum;
 //
-//	static uint16_t CRCCheck = 0;
-//	static uint16_t packetSize = 0;
-//	static uint16_t CRC_accum;
-
-//	//State Machine
+////	//State Machine
 ////	switch (State)
 ////	{
 ////	case Idle:
@@ -905,172 +910,175 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 ////
 ////			}
 ////		break;
-//	case DNMXP_2ndHeader:
-//		if (dataIn == 0xFD)
-//			State = DNMXP_3rdHeader;
-//		else if (dataIn == 0xFF)
-//			; //do nothing
-//		else
-//			State = DNMXP_idle;
-//		break;
-//	case DNMXP_3rdHeader:
-//		if (dataIn == 0x00)
-//			State = DNMXP_Reserved;
-//		else
-//			State = DNMXP_idle;
-//		break;
-//	case DNMXP_Reserved:
-//		if ((dataIn == MotorID) | (dataIn == 0xFE))
-//			State = DNMXP_ID;
-//		else
-//			State = DNMXP_idle;
-//		break;
-//	case DNMXP_ID:
-//		datalen = dataIn & 0xFF;
-//		State = DNMXP_LEN1;
-//		break;
-//	case DNMXP_LEN1:
-//		datalen |= (dataIn & 0xFF) << 8;
-//		State = DNMXP_LEN2;
-//		break;
-//	case DNMXP_LEN2:
-//		inst = dataIn;
-//		State = DNMXP_Inst;
-//		break;
-//	case DNMXP_Inst:
-//		if (datalen > 3)
-//		{
-//			parameter[0] = dataIn;
-//			CollectedData = 1; //inst 1 + para[0] 1
-//			State = DNMXP_ParameterCollect;
-//		}
-//		else
-//		{
-//			CRCCheck = dataIn & 0xff;
-//			State = DNMXP_CRCAndExecute;
-//		}
 //
-//		break;
-//	case DNMXP_ParameterCollect:
 //
-//		if (datalen-3 > CollectedData)
-//		{
-//			parameter[CollectedData] = dataIn;
-//			CollectedData++;
-//		}
-//		else
-//		{
-//			CRCCheck = dataIn & 0xff;
-//			State = DNMXP_CRCAndExecute;
-//		}
-//		break;
-//	case DNMXP_CRCAndExecute:
-//		CRCCheck |= (dataIn & 0xff) << 8;
-//		//Check CRC
-//		CRC_accum = 0;
-//		packetSize = datalen + 7;
-//		//check overlapse buffer
-//		if (uart->RxTail - packetSize >= 0) //not overlapse
-//		{
-//			CRC_accum = update_crc(CRC_accum,
-//					&(uart->RxBuffer[uart->RxTail - packetSize]),
-//					packetSize - 2);
-//		}
-//		else//overlapse
-//		{
-//			uint16_t firstPartStart = uart->RxTail - packetSize + uart->RxLen;
-//			CRC_accum = update_crc(CRC_accum, &(uart->RxBuffer[firstPartStart]),
-//					uart->RxLen - firstPartStart);
-//			CRC_accum = update_crc(CRC_accum, uart->RxBuffer, uart->RxTail - 2);
 //
-//		}
-//
-//		if (CRC_accum == CRCCheck)
-//		{
-//			switch (inst)
-//			{
-//			case 0x01:// ping
-//			{
-//				//create packet template
-//				uint8_t temp[] =
-//				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x04, 0x00, 0x55,0x00, 0x00, 0x00};
-//				//config MotorID
-//				temp[4] = MotorID;
-//				//calcuate CRC
-//				uint16_t crc_calc = update_crc(0, temp, 9);
-//				temp[9] = crc_calc & 0xff;
-//				temp[10] = (crc_calc >> 8) & 0xFF;
-//				//Sent Response Packet
-//				UARTTxWrite(uart, temp, 11);
-//				break;
-//			}
-//
-//			case 0x02://READ
-//			{
-//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
-//				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF);
-//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
-//				temp[4] = MotorID;
-//				temp[5] = (numberOfDataToRead + 4) & 0xff ; // +inst+err+crc1+crc2
-//				temp[6] = ((numberOfDataToRead + 4)>>8) & 0xff ;
-//				uint16_t crc_calc = update_crc(0, temp, 9);
-//				crc_calc = update_crc(crc_calc ,&(Memory[startAddr]),numberOfDataToRead);
-//				uint8_t crctemp[2];
-//				crctemp[0] = crc_calc&0xff;
-//				crctemp[1] = (crc_calc>>8)&0xff;
-//				UARTTxWrite(uart, temp,9);
-//				UARTTxWrite(uart, &(Memory[startAddr]),numberOfDataToRead);
-//				UARTTxWrite(uart, crctemp,2);
-//				break;
-//			}
-//			case 0x03://WRITE
-//			{
-//				//LAB
-//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
-//				uint16_t ParameterNumber = datalen - 5 ;
-//				for (int i = 0; i < ParameterNumber-1; i++)
-//				{
-//					Memory[startAddr + i] = parameter[i+1] ;
-//				}
-//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00};
-//				temp[4] = MotorID ;
-//				uint16_t crc_calc = update_crc(0, temp, 9);
-//				uint8_t crctemp[2];
-//				crctemp[0] = crc_calc&0xff;
-//				crctemp[1] = (crc_calc>>8)&0xff;
-//				UARTTxWrite(uart, temp,9);
-//				UARTTxWrite(uart, crctemp,2);
-//
-//			}
-////			default: //Unknown Inst
+////	case DNMXP_2ndHeader:
+////		if (dataIn == 0xFD)
+////			State = DNMXP_3rdHeader;
+////		else if (dataIn == 0xFF)
+////			; //do nothing
+////		else
+////			State = DNMXP_idle;
+////		break;
+////	case DNMXP_3rdHeader:
+////		if (dataIn == 0x00)
+////			State = DNMXP_Reserved;
+////		else
+////			State = DNMXP_idle;
+////		break;
+////	case DNMXP_Reserved:
+////		if ((dataIn == MotorID) | (dataIn == 0xFE))
+////			State = DNMXP_ID;
+////		else
+////			State = DNMXP_idle;
+////		break;
+////	case DNMXP_ID:
+////		datalen = dataIn & 0xFF;
+////		State = DNMXP_LEN1;
+////		break;
+////	case DNMXP_LEN1:
+////		datalen |= (dataIn & 0xFF) << 8;
+////		State = DNMXP_LEN2;
+////		break;
+////	case DNMXP_LEN2:
+////		inst = dataIn;
+////		State = DNMXP_Inst;
+////		break;
+////	case DNMXP_Inst:
+////		if (datalen > 3)
+////		{
+////			parameter[0] = dataIn;
+////			CollectedData = 1; //inst 1 + para[0] 1
+////			State = DNMXP_ParameterCollect;
+////		}
+////		else
+////		{
+////			CRCCheck = dataIn & 0xff;
+////			State = DNMXP_CRCAndExecute;
+////		}
+////
+////		break;
+////	case DNMXP_ParameterCollect:
+////
+////		if (datalen-3 > CollectedData)
+////		{
+////			parameter[CollectedData] = dataIn;
+////			CollectedData++;
+////		}
+////		else
+////		{
+////			CRCCheck = dataIn & 0xff;
+////			State = DNMXP_CRCAndExecute;
+////		}
+////		break;
+////	case DNMXP_CRCAndExecute:
+////		CRCCheck |= (dataIn & 0xff) << 8;
+////		//Check CRC
+////		CRC_accum = 0;
+////		packetSize = datalen + 7;
+////		//check overlapse buffer
+////		if (uart->RxTail - packetSize >= 0) //not overlapse
+////		{
+////			CRC_accum = update_crc(CRC_accum,
+////					&(uart->RxBuffer[uart->RxTail - packetSize]),
+////					packetSize - 2);
+////		}
+////		else//overlapse
+////		{
+////			uint16_t firstPartStart = uart->RxTail - packetSize + uart->RxLen;
+////			CRC_accum = update_crc(CRC_accum, &(uart->RxBuffer[firstPartStart]),
+////					uart->RxLen - firstPartStart);
+////			CRC_accum = update_crc(CRC_accum, uart->RxBuffer, uart->RxTail - 2);
+////
+////		}
+////
+////		if (CRC_accum == CRCCheck)
+////		{
+////			switch (inst)
 ////			{
+////			case 0x01:// ping
+////			{
+////				//create packet template
 ////				uint8_t temp[] =
-////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x02, 0x00,
-////						0x00 };
+////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x04, 0x00, 0x55,0x00, 0x00, 0x00};
+////				//config MotorID
 ////				temp[4] = MotorID;
+////				//calcuate CRC
 ////				uint16_t crc_calc = update_crc(0, temp, 9);
 ////				temp[9] = crc_calc & 0xff;
 ////				temp[10] = (crc_calc >> 8) & 0xFF;
+////				//Sent Response Packet
 ////				UARTTxWrite(uart, temp, 11);
-////
 ////				break;
 ////			}
-//			}
-//		}
-//		else //crc error
-//		{
-//			uint8_t temp[] =
-//			{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x03, 0x00, 0x00 };
-//			temp[4] = MotorID;
-//			uint16_t crc_calc = update_crc(0, temp, 9);
-//			temp[9] = crc_calc & 0xff;
-//			temp[10] = (crc_calc >> 8) & 0xFF;
-//			UARTTxWrite(uart, temp, 11);
-//		}
-//		State = DNMXP_idle;
-//		break;
-	}
-}
+////
+////			case 0x02://READ
+////			{
+////				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
+////				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF);
+////				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
+////				temp[4] = MotorID;
+////				temp[5] = (numberOfDataToRead + 4) & 0xff ; // +inst+err+crc1+crc2
+////				temp[6] = ((numberOfDataToRead + 4)>>8) & 0xff ;
+////				uint16_t crc_calc = update_crc(0, temp, 9);
+////				crc_calc = update_crc(crc_calc ,&(Memory[startAddr]),numberOfDataToRead);
+////				uint8_t crctemp[2];
+////				crctemp[0] = crc_calc&0xff;
+////				crctemp[1] = (crc_calc>>8)&0xff;
+////				UARTTxWrite(uart, temp,9);
+////				UARTTxWrite(uart, &(Memory[startAddr]),numberOfDataToRead);
+////				UARTTxWrite(uart, crctemp,2);
+////				break;
+////			}
+////			case 0x03://WRITE
+////			{
+////				//LAB
+////				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
+////				uint16_t ParameterNumber = datalen - 5 ;
+////				for (int i = 0; i < ParameterNumber-1; i++)
+////				{
+////					Memory[startAddr + i] = parameter[i+1] ;
+////				}
+////				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00};
+////				temp[4] = MotorID ;
+////				uint16_t crc_calc = update_crc(0, temp, 9);
+////				uint8_t crctemp[2];
+////				crctemp[0] = crc_calc&0xff;
+////				crctemp[1] = (crc_calc>>8)&0xff;
+////				UARTTxWrite(uart, temp,9);
+////				UARTTxWrite(uart, crctemp,2);
+////
+////			}
+//////			default: //Unknown Inst
+//////			{
+//////				uint8_t temp[] =
+//////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x02, 0x00,
+//////						0x00 };
+//////				temp[4] = MotorID;
+//////				uint16_t crc_calc = update_crc(0, temp, 9);
+//////				temp[9] = crc_calc & 0xff;
+//////				temp[10] = (crc_calc >> 8) & 0xFF;
+//////				UARTTxWrite(uart, temp, 11);
+//////
+//////				break;
+//////			}
+////			}
+////		}
+////		else //crc error
+////		{
+////			uint8_t temp[] =
+////			{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x03, 0x00, 0x00 };
+////			temp[4] = MotorID;
+////			uint16_t crc_calc = update_crc(0, temp, 9);
+////			temp[9] = crc_calc & 0xff;
+////			temp[10] = (crc_calc >> 8) & 0xFF;
+////			UARTTxWrite(uart, temp, 11);
+////		}
+////		State = DNMXP_idle;
+////		break;
+//	}
+//}
 
 uint16_t CheckSum(uint8_t Mode, uint8_t Frame, uint16_t Data)
 {
