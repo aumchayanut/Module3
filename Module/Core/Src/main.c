@@ -22,7 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdio.h"
+#include <stdlib.h>
+#include "string.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,6 +35,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define End_Eff 0x23
+#define Ack1 0b101100001110101
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -70,16 +73,15 @@ UARTStucrture UART2 =
 
 uint8_t MainMemory[255] =
 { 0 };
-static uint8_t parameter[256] =
-{ 0 };
 
 typedef enum
 {
 	Idle,
-	Start,
 	Frame1,
 	Frame2,
 	Frame3,
+	CheckSum2,
+	CheckSum3,
 //	Mode1,
 //	Mode2,
 //	Mode3,
@@ -96,11 +98,14 @@ typedef enum
 //	Mode14,
 	CS
 
-} UARTState;
+} State;
 uint8_t Mode = 0;
 uint8_t Frame = 0;
 uint8_t n_Station = 0;
 uint16_t Station[10] = {0};
+uint8_t input = 0;
+uint8_t UARTsuccess = 0;
+uint8_t UARTerror = 0;
 
 
 //PID
@@ -113,7 +118,9 @@ float DeltaU;
 float P = 20;
 float I = 5;
 float D = 0;
-float p,i,d;
+float p = 30;
+float i = 10;
+float d = 10;
 
 //Traj
 float StartTime ; //Start moving time
@@ -156,10 +163,14 @@ uint8_t ButtonBuffer[2] = {0} ; //Blue button
 uint64_t pidtuner = 0;
 uint8_t StartTune = 0;
 
-float x = 0 ; // request changed
 
 uint16_t EndEffStatus = 0 ;
 uint8_t test = 0;
+uint8_t frame1 = 0;
+uint8_t frame2 = 0;
+uint8_t frame3 = 0;
+uint16_t DataInTest = 0 ;
+uint8_t checksumtest = 0;
 
 
 
@@ -168,12 +179,12 @@ uint8_t test = 0;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
-static void MX_TIM3_Init(void);
 static void MX_DMA_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 uint64_t micros() ;
 float EncoderVelocity_Update();
@@ -188,13 +199,19 @@ void GoToGoal(float goal);
 
 //UART Function
 void UARTInit(UARTStucrture *uart);
+
 void UARTResetStart(UARTStucrture *uart);
+
 uint32_t UARTGetRxHead(UARTStucrture *uart);
+
 int16_t UARTReadChar(UARTStucrture *uart);
+
 void UARTTxDumpBuffer(UARTStucrture *uart);
+
 void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len);
+
 void Protocal(int16_t dataIn, UARTStucrture *uart);
-uint16_t CheckSum(uint8_t Mode, uint8_t Frame, uint16_t Data);
+int16_t CheckSumFunction(uint8_t CheckSum, uint8_t Frame, uint8_t Data);
 
 
 
@@ -233,22 +250,22 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_USART2_UART_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
-  MX_TIM3_Init();
   MX_DMA_Init();
   MX_I2C1_Init();
+  MX_TIM3_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-	UART2.huart = &huart2;
-	UART2.RxLen = 255;
-	UART2.TxLen = 255;
-	UARTInit(&UART2);
-	UARTResetStart(&UART2);
+UART2.huart = &huart2;
+UART2.RxLen = 255;
+UART2.TxLen = 255;
+UARTInit(&UART2);
+UARTResetStart(&UART2);
 
 
-  PIDinit() ;
+	PIDinit() ;
 
   // start PWM
   HAL_TIM_Base_Start(&htim1);
@@ -274,23 +291,17 @@ int main(void)
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ; //Degree unit
 	  PWMgeneration() ; //Gen PWM
 	  home = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
-	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ; // Read Blue button
-//**************************************************************************************
-//**********Blue Button Push*********************
-	  if (!ButtonBuffer[0] && ButtonBuffer[1])
-	  {
-		  EndEffWrite() ;
-//		  x += 1 ;
-//		  x = 1 ;
-		  StartSetHome = 1 ; //Set home trigger
-		  SetHomeFlag = 0;
-	  }
-	  ButtonBuffer[1] = ButtonBuffer[0] ;
-//	  if (x)
+//	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ; // Read Blue button
+////**************************************************************************************
+////**********Blue Button Push*********************
+//	  if (!ButtonBuffer[0] && ButtonBuffer[1])
 //	  {
-//		  EndEffWrite();
+//		  EndEffWrite() ;
+//		  StartSetHome = 1 ; //Set home trigger
+//		  SetHomeFlag = 0;
 //	  }
-//************************************************
+//	  ButtonBuffer[1] = ButtonBuffer[0] ;
+////************************************************
 //**********Set Home******************************
 	  if (StartSetHome == 1)
 	  {
@@ -314,25 +325,22 @@ int main(void)
 	  int16_t inputChar = UARTReadChar(&UART2);
 	  if (inputChar != -1)
 	  {
-//		  Protocal(inputChar, &UART2);
+		  Protocal(inputChar, &UART2);
+//		  input = ~inputChar;
 //		  char temp[32];
 //		  sprintf(temp, "Recived [%d]\r\n", inputChar);
 //		  UARTTxWrite(&UART2, (uint8_t*) temp, strlen(temp));
 	  }
+	  if (Mode == 12)
+	  {
+		  EndEffWrite();
+	  }
 
-//	  if (micros()-pidtuner > 5000000)
-//	  {
-//		  StartTune = !StartTune;
-//	  }
-//
-//	  if (StartTune)
-//	  {
-//		  request = 5;
-//	  }
-//	  else
-//	  {
-//		  request = 0;
-//	  }
+	  if (Mode == 14)
+	  {
+		  StartSetHome = 1 ; //Set home trigger
+		  //		  SetHomeFlag = 0;
+	  }
 
 //********other**************
 	  if (request == 0)
@@ -355,6 +363,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  UARTTxDumpBuffer(&UART2);
+
   }
   /* USER CODE END 3 */
 }
@@ -627,7 +637,7 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
   huart2.Init.BaudRate = 512000;
-  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.WordLength = UART_WORDLENGTH_9B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_EVEN;
   huart2.Init.Mode = UART_MODE_TX_RX;
@@ -710,7 +720,6 @@ void EndEffWrite()
 		uint8_t temp = 0x45;
 		uint8_t add = 0x23;
 		HAL_I2C_Master_Transmit(&hi2c1, add << 1, &temp, 1, 1000); //Write eff
-		x+=1;
 //		HAL_I2C_Master_Transmit_IT(&hi2c1, 0x23<<1, 0x45, 1);
 	}
 
@@ -728,7 +737,9 @@ void UARTInit(UARTStucrture *uart)
 	uart->RxTail = 0;
 	uart->TxTail = 0;
 	uart->TxHead = 0;
+
 }
+
 void UARTResetStart(UARTStucrture *uart)
 {
 	HAL_UART_Receive_DMA(uart->huart, uart->RxBuffer, uart->RxLen);
@@ -739,7 +750,7 @@ uint32_t UARTGetRxHead(UARTStucrture *uart)
 }
 int16_t UARTReadChar(UARTStucrture *uart)
 {
-	int16_t Result = -1; // -1 Mean no new data
+	uint16_t Result = -1; // -1 Mean no new data
 
 	//check Buffer Position
 	if (uart->RxTail != UARTGetRxHead(uart))
@@ -781,6 +792,7 @@ void UARTTxDumpBuffer(UARTStucrture *uart)
 }
 void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len)
 {
+
 	//check data len is more than buffer?
 	uint16_t lenAddBuffer = (len <= uart->TxLen) ? len : uart->TxLen;
 
@@ -802,299 +814,363 @@ void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len)
 	}
 	UARTTxDumpBuffer(uart);
 }
-//void Protocal(int16_t dataIn,UARTStucrture *uart)
-//{
-//	//all Static Variable
-//	static UARTState State = Idle;
-//	uint8_t StartBit = 0b1001;
-////	static uint16_t datalen = 0;
-//	static uint16_t CollectedData = 0;
-////	static uint8_t inst = 0;
-////
-////	static uint16_t CRCCheck = 0;
-////	static uint16_t packetSize = 0;
-////	static uint16_t CRC_accum;
+
+void Protocal(int16_t dataIn,UARTStucrture *uart)
+{
+	//all Static Variable
+	static State State = Idle;
+	static uint8_t StartBit = 0b1001;
+	static uint8_t ModeIN = 0;
+	static uint8_t CheckSum = 0;
+	static uint16_t CollectedData = 0;
+
+	DataInTest = dataIn&0xf0;
+//	static uint8_t inst = 0;
 //
-////	//State Machine
-////	switch (State)
-////	{
-////	case Idle:
-////		if (dataIn&0xf0 == 1001)
-////			Mode = dataIn&0xf;
-////			if (Mode == 0b0001)
-////			{
-////				Mode = 1;
-////				Frame = 2;
-////			}
-////			if (Mode == 0b0010)
-////			{
-////				Mode = 2;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b0011)
-////			{
-////				Mode = 3;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b0100)
-////			{
-////				Mode = 4;
-////				Frame = 2;
-////			}
-////			if (Mode == 0b0101)
-////			{
-////				Mode = 5;
-////				Frame = 2;
-////			}
-////			if (Mode == 0b0110)
-////			{
-////				Mode = 6;
-////				Frame = 2;
-////			}
-////			if (Mode == 0b0111)
-////			{
-////				Mode = 7;
-////				Frame = 3;
-////			}
-////			if (Mode == 0b1000)
-////			{
-////				Mode = 8;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b1001)
-////			{
-////				Mode = 9;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b1010)
-////			{
-////				Mode = 10;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b1011)
-////			{
-////				Mode = 11;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b1100)
-////			{
-////				Mode = 12;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b1101)
-////			{
-////				Mode = 13;
-////				Frame = 1;
-////			}
-////			if (Mode == 0b1110)
-////			{
-////				Mode = 14;
-////				Frame = 1;
-////			}
-////			if (Frame == 1)
-////			{
-////				State = Frame1;
-////			}
-////			if (Frame == 2)
-////			{
-////				State = Frame2;
-////			}
-////			if (Frame == 3)
-////			{
-////				State = Frame3;
-////			}
-////		break;
-////	case Frame1:
-////			if (dataIn == CheckSum(Mode, Frame, CollectedData))
-////			{
-////
-////			}
-////		break;
+//	static uint16_t CRCCheck = 0;
+//	static uint16_t packetSize = 0;
+//	static uint16_t CRC_accum;
+
+//	//State Machine
+	switch (State)
+	{
+	case Idle:
+		UARTsuccess = 0;
+		UARTerror = 0;
+		if (DataInTest == 0b10010000)
+		{
+			ModeIN = dataIn&0xf;
+			if (ModeIN == 0b0001)
+			{
+				Mode = 1;
+				CheckSum = (StartBit << 4) | 0b1;
+				Frame = 2;
+				State = Frame2;
+			}
+			if (ModeIN == 0b0010)
+			{
+				Mode = 2;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b10;
+			}
+			if (ModeIN == 0b0011)
+			{
+				Mode = 3;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b11;
+			}
+			if (ModeIN == 0b0100)
+			{
+				Mode = 4;
+				State = Frame2;
+				Frame = 2;
+				CheckSum = (StartBit << 4) | 0b100;
+			}
+			if (ModeIN == 0b0101)
+			{
+				Mode = 5;
+				State = Frame2;
+				Frame = 2;
+				CheckSum = (StartBit << 4) | 0b101;
+			}
+			if (ModeIN == 0b0110)
+			{
+				Mode = 6;
+				State = Frame2;
+				Frame = 2;
+				CheckSum = (StartBit << 4) | 0b110;
+			}
+			if (ModeIN == 0b0111)
+			{
+				Mode = 7;
+				State = Frame3;
+				Frame = 3;
+				CheckSum = (StartBit << 4) | 0b111;
+			}
+			if (ModeIN == 0b1000)
+			{
+				Mode = 8;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b1000;
+			}
+			if (ModeIN == 0b1001)
+			{
+				Mode = 9;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b1001;
+			}
+			if (ModeIN == 0b1010)
+			{
+				Mode = 10;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b1010;
+			}
+			if (ModeIN == 0b1011)
+			{
+				Mode = 11;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b1011;
+			}
+			if (ModeIN == 0b1100)
+			{
+				Mode = 12;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b1100;
+			}
+			if (ModeIN == 0b1101)
+			{
+				Mode = 13;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b1101;
+			}
+			if (ModeIN == 0b1110)
+			{
+				Mode = 14;
+				State = Frame1;
+				Frame = 1;
+				CheckSum = (StartBit << 4) | 0b1110;
+			}
+		}
+		else
+		{
+			State = Idle;
+		}
+		break;
+	case Frame1:
+		frame1 = dataIn;
+		checksumtest = CheckSumFunction(CheckSum, Frame, CollectedData);
+			if (frame1 == checksumtest)
+			{
+				UARTsuccess += 1;
+//				UARTTxWrite(&UART2, (uint8_t*)Ack1, 3);
+				uint8_t temp[] = {0x58, 0b01110101};
+				UARTTxWrite(&UART2, temp, 2);
+				State = Idle;
+			}
+			else
+			{
+				Mode = 0;
+				UARTerror += 1;
+				State = Idle;
+			}
+		break;
+
+	case Frame2:
+		CollectedData = dataIn;
+		State = CheckSum2;
+		break;
+	case CheckSum2:
+		frame2 = dataIn;
+		test = CheckSum + CollectedData;//test
+		checksumtest = CheckSumFunction(CheckSum, Frame, CollectedData);
+		if (frame2 == checksumtest)
+		{
+			UARTsuccess += 1;
+			State = Idle;
+		}
+		else
+		{
+			UARTerror += 1;
+			State = Idle;
+		}
+
+		break;
+
+	case Frame3:
+		frame3 += 1;
+		break;
+
+
+
+//	case DNMXP_2ndHeader:
+//		if (dataIn == 0xFD)
+//			State = DNMXP_3rdHeader;
+//		else if (dataIn == 0xFF)
+//			; //do nothing
+//		else
+//			State = DNMXP_idle;
+//		break;
+//	case DNMXP_3rdHeader:
+//		if (dataIn == 0x00)
+//			State = DNMXP_Reserved;
+//		else
+//			State = DNMXP_idle;
+//		break;
+//	case DNMXP_Reserved:
+//		if ((dataIn == MotorID) | (dataIn == 0xFE))
+//			State = DNMXP_ID;
+//		else
+//			State = DNMXP_idle;
+//		break;
+//	case DNMXP_ID:
+//		datalen = dataIn & 0xFF;
+//		State = DNMXP_LEN1;
+//		break;
+//	case DNMXP_LEN1:
+//		datalen |= (dataIn & 0xFF) << 8;
+//		State = DNMXP_LEN2;
+//		break;
+//	case DNMXP_LEN2:
+//		inst = dataIn;
+//		State = DNMXP_Inst;
+//		break;
+//	case DNMXP_Inst:
+//		if (datalen > 3)
+//		{
+//			parameter[0] = dataIn;
+//			CollectedData = 1; //inst 1 + para[0] 1
+//			State = DNMXP_ParameterCollect;
+//		}
+//		else
+//		{
+//			CRCCheck = dataIn & 0xff;
+//			State = DNMXP_CRCAndExecute;
+//		}
 //
+//		break;
+//	case DNMXP_ParameterCollect:
 //
+//		if (datalen-3 > CollectedData)
+//		{
+//			parameter[CollectedData] = dataIn;
+//			CollectedData++;
+//		}
+//		else
+//		{
+//			CRCCheck = dataIn & 0xff;
+//			State = DNMXP_CRCAndExecute;
+//		}
+//		break;
+//	case DNMXP_CRCAndExecute:
+//		CRCCheck |= (dataIn & 0xff) << 8;
+//		//Check CRC
+//		CRC_accum = 0;
+//		packetSize = datalen + 7;
+//		//check overlapse buffer
+//		if (uart->RxTail - packetSize >= 0) //not overlapse
+//		{
+//			CRC_accum = update_crc(CRC_accum,
+//					&(uart->RxBuffer[uart->RxTail - packetSize]),
+//					packetSize - 2);
+//		}
+//		else//overlapse
+//		{
+//			uint16_t firstPartStart = uart->RxTail - packetSize + uart->RxLen;
+//			CRC_accum = update_crc(CRC_accum, &(uart->RxBuffer[firstPartStart]),
+//					uart->RxLen - firstPartStart);
+//			CRC_accum = update_crc(CRC_accum, uart->RxBuffer, uart->RxTail - 2);
 //
-////	case DNMXP_2ndHeader:
-////		if (dataIn == 0xFD)
-////			State = DNMXP_3rdHeader;
-////		else if (dataIn == 0xFF)
-////			; //do nothing
-////		else
-////			State = DNMXP_idle;
-////		break;
-////	case DNMXP_3rdHeader:
-////		if (dataIn == 0x00)
-////			State = DNMXP_Reserved;
-////		else
-////			State = DNMXP_idle;
-////		break;
-////	case DNMXP_Reserved:
-////		if ((dataIn == MotorID) | (dataIn == 0xFE))
-////			State = DNMXP_ID;
-////		else
-////			State = DNMXP_idle;
-////		break;
-////	case DNMXP_ID:
-////		datalen = dataIn & 0xFF;
-////		State = DNMXP_LEN1;
-////		break;
-////	case DNMXP_LEN1:
-////		datalen |= (dataIn & 0xFF) << 8;
-////		State = DNMXP_LEN2;
-////		break;
-////	case DNMXP_LEN2:
-////		inst = dataIn;
-////		State = DNMXP_Inst;
-////		break;
-////	case DNMXP_Inst:
-////		if (datalen > 3)
-////		{
-////			parameter[0] = dataIn;
-////			CollectedData = 1; //inst 1 + para[0] 1
-////			State = DNMXP_ParameterCollect;
-////		}
-////		else
-////		{
-////			CRCCheck = dataIn & 0xff;
-////			State = DNMXP_CRCAndExecute;
-////		}
-////
-////		break;
-////	case DNMXP_ParameterCollect:
-////
-////		if (datalen-3 > CollectedData)
-////		{
-////			parameter[CollectedData] = dataIn;
-////			CollectedData++;
-////		}
-////		else
-////		{
-////			CRCCheck = dataIn & 0xff;
-////			State = DNMXP_CRCAndExecute;
-////		}
-////		break;
-////	case DNMXP_CRCAndExecute:
-////		CRCCheck |= (dataIn & 0xff) << 8;
-////		//Check CRC
-////		CRC_accum = 0;
-////		packetSize = datalen + 7;
-////		//check overlapse buffer
-////		if (uart->RxTail - packetSize >= 0) //not overlapse
-////		{
-////			CRC_accum = update_crc(CRC_accum,
-////					&(uart->RxBuffer[uart->RxTail - packetSize]),
-////					packetSize - 2);
-////		}
-////		else//overlapse
-////		{
-////			uint16_t firstPartStart = uart->RxTail - packetSize + uart->RxLen;
-////			CRC_accum = update_crc(CRC_accum, &(uart->RxBuffer[firstPartStart]),
-////					uart->RxLen - firstPartStart);
-////			CRC_accum = update_crc(CRC_accum, uart->RxBuffer, uart->RxTail - 2);
-////
-////		}
-////
-////		if (CRC_accum == CRCCheck)
-////		{
-////			switch (inst)
+//		}
+//
+//		if (CRC_accum == CRCCheck)
+//		{
+//			switch (inst)
+//			{
+//			case 0x01:// ping
+//			{
+//				//create packet template
+//				uint8_t temp[] =
+//				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x04, 0x00, 0x55,0x00, 0x00, 0x00};
+//				//config MotorID
+//				temp[4] = MotorID;
+//				//calcuate CRC
+//				uint16_t crc_calc = update_crc(0, temp, 9);
+//				temp[9] = crc_calc & 0xff;
+//				temp[10] = (crc_calc >> 8) & 0xFF;
+//				//Sent Response Packet
+//				UARTTxWrite(uart, temp, 11);
+//				break;
+//			}
+//
+//			case 0x02://READ
+//			{
+//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
+//				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF);
+//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
+//				temp[4] = MotorID;
+//				temp[5] = (numberOfDataToRead + 4) & 0xff ; // +inst+err+crc1+crc2
+//				temp[6] = ((numberOfDataToRead + 4)>>8) & 0xff ;
+//				uint16_t crc_calc = update_crc(0, temp, 9);
+//				crc_calc = update_crc(crc_calc ,&(Memory[startAddr]),numberOfDataToRead);
+//				uint8_t crctemp[2];
+//				crctemp[0] = crc_calc&0xff;
+//				crctemp[1] = (crc_calc>>8)&0xff;
+//				UARTTxWrite(uart, temp,9);
+//				UARTTxWrite(uart, &(Memory[startAddr]),numberOfDataToRead);
+//				UARTTxWrite(uart, crctemp,2);
+//				break;
+//			}
+//			case 0x03://WRITE
+//			{
+//				//LAB
+//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
+//				uint16_t ParameterNumber = datalen - 5 ;
+//				for (int i = 0; i < ParameterNumber-1; i++)
+//				{
+//					Memory[startAddr + i] = parameter[i+1] ;
+//				}
+//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00};
+//				temp[4] = MotorID ;
+//				uint16_t crc_calc = update_crc(0, temp, 9);
+//				uint8_t crctemp[2];
+//				crctemp[0] = crc_calc&0xff;
+//				crctemp[1] = (crc_calc>>8)&0xff;
+//				UARTTxWrite(uart, temp,9);
+//				UARTTxWrite(uart, crctemp,2);
+//
+//			}
+////			default: //Unknown Inst
 ////			{
-////			case 0x01:// ping
-////			{
-////				//create packet template
 ////				uint8_t temp[] =
-////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x04, 0x00, 0x55,0x00, 0x00, 0x00};
-////				//config MotorID
+////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x02, 0x00,
+////						0x00 };
 ////				temp[4] = MotorID;
-////				//calcuate CRC
 ////				uint16_t crc_calc = update_crc(0, temp, 9);
 ////				temp[9] = crc_calc & 0xff;
 ////				temp[10] = (crc_calc >> 8) & 0xFF;
-////				//Sent Response Packet
 ////				UARTTxWrite(uart, temp, 11);
+////
 ////				break;
 ////			}
-////
-////			case 0x02://READ
-////			{
-////				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
-////				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF);
-////				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
-////				temp[4] = MotorID;
-////				temp[5] = (numberOfDataToRead + 4) & 0xff ; // +inst+err+crc1+crc2
-////				temp[6] = ((numberOfDataToRead + 4)>>8) & 0xff ;
-////				uint16_t crc_calc = update_crc(0, temp, 9);
-////				crc_calc = update_crc(crc_calc ,&(Memory[startAddr]),numberOfDataToRead);
-////				uint8_t crctemp[2];
-////				crctemp[0] = crc_calc&0xff;
-////				crctemp[1] = (crc_calc>>8)&0xff;
-////				UARTTxWrite(uart, temp,9);
-////				UARTTxWrite(uart, &(Memory[startAddr]),numberOfDataToRead);
-////				UARTTxWrite(uart, crctemp,2);
-////				break;
-////			}
-////			case 0x03://WRITE
-////			{
-////				//LAB
-////				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
-////				uint16_t ParameterNumber = datalen - 5 ;
-////				for (int i = 0; i < ParameterNumber-1; i++)
-////				{
-////					Memory[startAddr + i] = parameter[i+1] ;
-////				}
-////				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00};
-////				temp[4] = MotorID ;
-////				uint16_t crc_calc = update_crc(0, temp, 9);
-////				uint8_t crctemp[2];
-////				crctemp[0] = crc_calc&0xff;
-////				crctemp[1] = (crc_calc>>8)&0xff;
-////				UARTTxWrite(uart, temp,9);
-////				UARTTxWrite(uart, crctemp,2);
-////
-////			}
-//////			default: //Unknown Inst
-//////			{
-//////				uint8_t temp[] =
-//////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x02, 0x00,
-//////						0x00 };
-//////				temp[4] = MotorID;
-//////				uint16_t crc_calc = update_crc(0, temp, 9);
-//////				temp[9] = crc_calc & 0xff;
-//////				temp[10] = (crc_calc >> 8) & 0xFF;
-//////				UARTTxWrite(uart, temp, 11);
-//////
-//////				break;
-//////			}
-////			}
-////		}
-////		else //crc error
-////		{
-////			uint8_t temp[] =
-////			{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x03, 0x00, 0x00 };
-////			temp[4] = MotorID;
-////			uint16_t crc_calc = update_crc(0, temp, 9);
-////			temp[9] = crc_calc & 0xff;
-////			temp[10] = (crc_calc >> 8) & 0xFF;
-////			UARTTxWrite(uart, temp, 11);
-////		}
-////		State = DNMXP_idle;
-////		break;
-//	}
-//}
+//			}
+//		}
+//		else //crc error
+//		{
+//			uint8_t temp[] =
+//			{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x03, 0x00, 0x00 };
+//			temp[4] = MotorID;
+//			uint16_t crc_calc = update_crc(0, temp, 9);
+//			temp[9] = crc_calc & 0xff;
+//			temp[10] = (crc_calc >> 8) & 0xFF;
+//			UARTTxWrite(uart, temp, 11);
+//		}
+//		State = DNMXP_idle;
+//		break;
+	}
+}
 
-uint16_t CheckSum(uint8_t Mode, uint8_t Frame, uint16_t Data)
+int16_t CheckSumFunction(uint8_t CheckSum, uint8_t Frame, uint8_t Data)
 {
-	uint8_t Start = 0b1001;
 	uint16_t result = 0;
 	if (Frame == 1)
 	{
-		result = ~((Start<<4)|Mode);
+		result = ~(CheckSum);
 	}
 	if (Frame == 2)
 	{
-		result = ~(((Start<<4)|Mode)+Data);
+		result = ~((CheckSum)+Data);
 	}
 	if (Frame == 3)
 	{
-		result = ~(((Start<<4)|Mode)+Data);
+		result = ~((CheckSum)+Data);
 	}
 	return result;
 }
@@ -1130,9 +1206,6 @@ void SetHome()
 			SetHomeFlag = 3;
 		}
 	}
-
-
-
 }
 
 
