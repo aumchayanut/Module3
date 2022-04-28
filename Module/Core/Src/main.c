@@ -25,6 +25,7 @@
 #include "stdio.h"
 #include <stdlib.h>
 #include "string.h"
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -78,25 +79,12 @@ typedef enum
 {
 	Idle,
 	Frame1,
-	Frame2,
-	Frame3,
+	Frame2_1,
+	Frame2_2,
+	Frame3_n,
+	Frame3_station,
 	CheckSum2,
 	CheckSum3,
-//	Mode1,
-//	Mode2,
-//	Mode3,
-//	Mode4,
-//	Mode5,
-//	Mode6,
-//	Mode7,
-//	Mode8,
-//	Mode9,
-//	Mode10,
-//	Mode11,
-//	Mode12,
-//	Mode13,
-//	Mode14,
-	CS
 
 } State;
 uint8_t Mode = 0;
@@ -109,17 +97,17 @@ uint8_t UARTerror = 0;
 
 
 //PID
-int InitialPWM = 1300 ; //offset start pwm
+int InitialPWM = 6500 ; //offset start pwm
 uint64_t TimestampPID = 0 ; //PID period
 float SampleTime = 0.00001 ; //PID period
 float PreviousPWM = 0 ;
 float preErr1,preErr2,Propotional,Integrator,Differentiator,preVel,Tau ;
 float DeltaU;
-float P = 20;
-float I = 5;
+float P = 0;
+float I = 0;
 float D = 0;
-float p = 30;
-float i = 10;
+float p = 47.8125;
+float i = 12.8525;
 float d = 10;
 
 //Traj
@@ -136,6 +124,8 @@ float Qi,Qf,TA,TV,T,tau ;
 float TA1,TA2,TA3,TV1 ;
 uint64_t Trajtimestamp;
 uint8_t via_point = 0;
+float VmaxRPM = 10 ; //rpm
+float VmaxReal = 0;
 
 
 //Set Home
@@ -171,8 +161,10 @@ uint8_t frame2 = 0;
 uint8_t frame3 = 0;
 uint16_t DataInTest = 0 ;
 uint8_t checksumtest = 0;
-
-
+uint8_t ReachedStation = 0;
+uint8_t StartNstation = 10;
+uint8_t MovingState = 0;
+uint64_t movingTimestamp = 0;
 
 /* USER CODE END PV */
 
@@ -197,19 +189,16 @@ void SetHome() ;
 void EndEffWrite() ;
 void GoToGoal(float goal);
 
+void WriteACK1();
+void WriteACK2();
+
 //UART Function
 void UARTInit(UARTStucrture *uart);
-
 void UARTResetStart(UARTStucrture *uart);
-
 uint32_t UARTGetRxHead(UARTStucrture *uart);
-
 int16_t UARTReadChar(UARTStucrture *uart);
-
 void UARTTxDumpBuffer(UARTStucrture *uart);
-
 void UARTTxWrite(UARTStucrture *uart, uint8_t *pData, uint16_t len);
-
 void Protocal(int16_t dataIn, UARTStucrture *uart);
 int16_t CheckSumFunction(uint8_t CheckSum, uint8_t Frame, uint8_t Data);
 
@@ -284,24 +273,60 @@ UARTResetStart(&UART2);
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+//	  Station[0] = 45;
+//	  Station[1] = 360;
+//	  Station[2] = 25;
+//	  Station[3] = 30;
+//	  Station[4] = 45;
+//	  Station[5] = 270;
+//	  Station[6] = 45;
+//	  Station[7] = 90;
+//	  Station[8] = 270;
+//	  Station[9] = 0;
+//	  if (StartNstation!=0)
+//	  {
+//		  if (micros() - movingTimestamp >= 5000000)
+//		  {
+//			  StartMoving = 1 ;
+//		  }
+//	  }
+//
+//	  if (StartNstation != 0)
+//	  {
+//		  FinalPos = Station[10-StartNstation];
+//	  }
 
 //***********General********************************************************************
 
+
+//	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+//	  if (ButtonBuffer[1] == 0 && ButtonBuffer[0]== 1)
+//	  {
+//		  EndEffWrite();
+//	  }
+//	  ButtonBuffer[1] = ButtonBuffer[0];
+
+	  float V;
 	  VelocityRPM = Velocity() ; //rpm unit
+	  if (VelocityRPM < 0)
+	  {
+		  V = (-1) * VelocityRPM;
+		  if (V > VmaxReal)
+		  {
+			  VmaxReal = VelocityRPM;
+		  }
+	  }
+	  else
+	  {
+		  V = VelocityRPM;
+		  if (V > VmaxReal)
+		  {
+			  VmaxReal = VelocityRPM;
+		  }
+	  }
+
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ; //Degree unit
 	  PWMgeneration() ; //Gen PWM
-	  home = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
-//	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) ; // Read Blue button
-////**************************************************************************************
-////**********Blue Button Push*********************
-//	  if (!ButtonBuffer[0] && ButtonBuffer[1])
-//	  {
-//		  EndEffWrite() ;
-//		  StartSetHome = 1 ; //Set home trigger
-//		  SetHomeFlag = 0;
-//	  }
-//	  ButtonBuffer[1] = ButtonBuffer[0] ;
-////************************************************
 //**********Set Home******************************
 	  if (StartSetHome == 1)
 	  {
@@ -326,10 +351,6 @@ UARTResetStart(&UART2);
 	  if (inputChar != -1)
 	  {
 		  Protocal(inputChar, &UART2);
-//		  input = ~inputChar;
-//		  char temp[32];
-//		  sprintf(temp, "Recived [%d]\r\n", inputChar);
-//		  UARTTxWrite(&UART2, (uint8_t*) temp, strlen(temp));
 	  }
 	  if (Mode == 12)
 	  {
@@ -354,6 +375,7 @@ UARTResetStart(&UART2);
 		  TV = 0;
 		  TA = 0;
 		  ST = 0;
+//		  PIDinit();
 	  }
 	  if (StartMoving == 1)
 	  {
@@ -429,7 +451,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.ClockSpeed = 10000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -470,7 +492,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 10000;
+  htim1.Init.Period = 50000;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -823,6 +845,10 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 	static uint8_t ModeIN = 0;
 	static uint8_t CheckSum = 0;
 	static uint16_t CollectedData = 0;
+	static uint16_t CollectedData2 = 0;
+	static uint16_t stationSUM;
+	static uint8_t CurrentAngle1 = 0;
+	static uint8_t CurrentAngle2 = 0;
 
 	DataInTest = dataIn&0xf0;
 //	static uint8_t inst = 0;
@@ -845,7 +871,7 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 				Mode = 1;
 				CheckSum = (StartBit << 4) | 0b1;
 				Frame = 2;
-				State = Frame2;
+				State = Frame2_1;
 			}
 			if (ModeIN == 0b0010)
 			{
@@ -864,28 +890,28 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 			if (ModeIN == 0b0100)
 			{
 				Mode = 4;
-				State = Frame2;
+				State = Frame2_1;
 				Frame = 2;
 				CheckSum = (StartBit << 4) | 0b100;
 			}
 			if (ModeIN == 0b0101)
 			{
 				Mode = 5;
-				State = Frame2;
+				State = Frame2_1;
 				Frame = 2;
 				CheckSum = (StartBit << 4) | 0b101;
 			}
 			if (ModeIN == 0b0110)
 			{
 				Mode = 6;
-				State = Frame2;
+				State = Frame2_1;
 				Frame = 2;
 				CheckSum = (StartBit << 4) | 0b110;
 			}
 			if (ModeIN == 0b0111)
 			{
 				Mode = 7;
-				State = Frame3;
+				State = Frame3_n;
 				Frame = 3;
 				CheckSum = (StartBit << 4) | 0b111;
 			}
@@ -950,9 +976,26 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 			if (frame1 == checksumtest)
 			{
 				UARTsuccess += 1;
-//				UARTTxWrite(&UART2, (uint8_t*)Ack1, 3);
-				uint8_t temp[] = {0x58, 0b01110101};
-				UARTTxWrite(&UART2, temp, 2);
+				if (Mode == 2 || Mode == 3 || Mode == 12 || Mode == 13 || Mode == 14)
+				{
+					WriteACK1();
+				}
+				if (Mode == 10) //Decimal 4 degree
+				{
+					WriteACK1();
+					CurrentAngle1 = (int8_t)(Degree * 10000 * 3.14159265 / 256 /180) ;
+					CurrentAngle2 = (int8_t)((int)(Degree* 10000 * 3.14159265 / 180) % 256) ;
+					uint8_t temp[] = {CurrentAngle1, CurrentAngle2};
+					UARTTxWrite(&UART2, temp, 2);
+					//read Ack
+				}
+				if (Mode == 11)
+				{
+					WriteACK1();
+					//send Vmax
+					//read Ack
+
+				}
 				State = Idle;
 			}
 			else
@@ -963,17 +1006,32 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 			}
 		break;
 
-	case Frame2:
+	case Frame2_1:
 		CollectedData = dataIn;
+		State = Frame2_2;
+		break;
+	case Frame2_2:
+		CollectedData2 = dataIn;
 		State = CheckSum2;
 		break;
 	case CheckSum2:
 		frame2 = dataIn;
-		test = CheckSum + CollectedData;//test
-		checksumtest = CheckSumFunction(CheckSum, Frame, CollectedData);
+		test = CheckSum + CollectedData + CollectedData2;//test
+		checksumtest = CheckSumFunction(CheckSum, Frame, CollectedData + CollectedData2);
 		if (frame2 == checksumtest)
 		{
 			UARTsuccess += 1;
+			if (Mode == 4)
+			{
+				VmaxRPM = (double)CollectedData2/255*10 ;
+				WriteACK1();
+			}
+			if (Mode == 5)
+			{
+				FinalPos = (((double)CollectedData * 256) + ((double)CollectedData2))/10000/3.14159265*180;
+				WriteACK1();
+			}
+
 			State = Idle;
 		}
 		else
@@ -984,10 +1042,31 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 
 		break;
 
-	case Frame3:
-		frame3 += 1;
-		break;
-
+//	case Frame3_n:
+//		CollectedData = dataIn;
+//		n_Station = dataIn;
+//		State = Frame3_station;
+//		break;
+//	case Frame3_station:
+//		CollectedData -= 1 ;
+//		if (CollectedData != 0)
+//		{
+//			Station[10-CollectedData] = dataIn;
+//			State = Frame3_station;
+//		}
+//		else
+//		{
+//			State = CheckSum3 ;
+//		}
+//		break;
+//
+//	case CheckSum3:
+//		for (int i=0;i<10;i++)
+//		{
+//			stationSUM = stationSUM + Station[i];
+//		}
+//		checksumtest = CheckSumFunction(CheckSum, Frame, n_Station + stationSUM);
+//		break;
 
 
 //	case DNMXP_2ndHeader:
@@ -1174,6 +1253,21 @@ int16_t CheckSumFunction(uint8_t CheckSum, uint8_t Frame, uint8_t Data)
 	}
 	return result;
 }
+
+void WriteACK1()
+{
+	//*********write ACK1*****************
+	uint8_t temp[] = {0x58, 0b01110101};
+	UARTTxWrite(&UART2, temp, 2);
+	//************************************
+}
+void WriteACK2()
+{
+	//*********write ACK2*****************
+	uint8_t temp[] = {70, 0x6e};
+	UARTTxWrite(&UART2, temp, 2);
+	//************************************
+}
 void SetHome()
 {
 	HomeSignal[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0) ; //Read set home
@@ -1211,8 +1305,8 @@ void SetHome()
 
 void Trajec()
 {
-	float Vmax = 10 ; //rpm
-	Vmax = Vmax * 0.10472 ; //rad per sec
+	float Vmax;
+	Vmax = VmaxRPM * 0.10472 ; //rad per sec
 	float Amax = 0.5 ;  //rad per sec square
 	if (ST == 0)
 	{
@@ -1286,7 +1380,24 @@ void Trajec()
 	}
 	if (micros() - StartTime > (T*1000000)+500000)
 	{
+		if (Mode == 5)
+		{
+			WriteACK1();
+		}
+		EndEffWrite();
 		StartMoving = 0;
+		StartNstation -= 1 ;
+		movingTimestamp = micros();
+
+
+//		MovingState = 1;
+//
+//		if (StartNstation == -1)
+//		{
+//			StartMoving = 0;
+//			StartNstation = 10;
+//		}
+
 	}
 
 }
@@ -1324,9 +1435,9 @@ void PID()
 	float error = req - Vel;
 	DeltaU = ((P+I+D)*error) - ((P+(2*D))*preErr1) + (D*preErr2) ;
 	PWMPercent = PreviousPWM + DeltaU + InitialPWM ;
-	if (PWMPercent > 10000)
+	if (PWMPercent > 50000)
 	{
-		PWMPercent = 10000;
+		PWMPercent = 50000;
 	}
 	if (PWMPercent < 0)
 	{
@@ -1418,7 +1529,7 @@ void PWMgeneration()
 {
 	  if (Direction == 0)
 	  {
-		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 10000);
+		  __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 50000);
 	  }
 	  if (Direction == 1)
 	  {
