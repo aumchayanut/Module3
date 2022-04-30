@@ -74,7 +74,7 @@ UARTStucrture UART2 =
 
 uint8_t MainMemory[255] =
 { 0 };
-
+uint16_t n=0;
 typedef enum
 {
 	Idle,
@@ -94,7 +94,7 @@ uint16_t Station[10] = {0};
 uint8_t input = 0;
 uint8_t UARTsuccess = 0;
 uint8_t UARTerror = 0;
-
+uint8_t enable_eff = 0;
 
 //PID
 int InitialPWM = 6500 ; //offset start pwm
@@ -109,6 +109,7 @@ float D = 0;
 float p = 47.8125;
 float i = 12.8525;
 float d = 10;
+float PP,II,DD,SUM,PPreerror;
 
 //Traj
 float StartTime ; //Start moving time
@@ -126,6 +127,10 @@ uint64_t Trajtimestamp;
 uint8_t via_point = 0;
 float VmaxRPM = 10 ; //rpm
 float VmaxReal = 0;
+uint8_t YangMaiTrong = 0;
+uint8_t FinishedTraj = 0;
+uint64_t Trong1Vi = 0;
+uint8_t Vi = 0;
 
 
 //Set Home
@@ -150,9 +155,8 @@ float VelocityRPM ; //velocity RPM unit
 float Degree = 0 ; //Position Degree unit
 uint8_t Direction = 0 ; //0 CW - 1 CCW - 2 Stop
 uint8_t ButtonBuffer[2] = {0} ; //Blue button
-uint64_t pidtuner = 0;
-uint8_t StartTune = 0;
-
+uint8_t FinishedStation = 0;
+uint8_t FinishedTask = 0;
 
 uint16_t EndEffStatus = 0 ;
 uint8_t test = 0;
@@ -187,7 +191,7 @@ void PIDinit() ;
 void Trajec();
 void SetHome() ;
 void EndEffWrite() ;
-void GoToGoal(float goal);
+void SecondPID() ;
 
 void WriteACK1();
 void WriteACK2();
@@ -293,19 +297,20 @@ UARTResetStart(&UART2);
 //
 //	  if (StartNstation != 0)
 //	  {
-//		  FinalPos = Station[10-StartNstation];
+//		  FinalPos = Station[FinishedStation];
 //	  }
 
-//***********General********************************************************************
-
-
-//	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
-//	  if (ButtonBuffer[1] == 0 && ButtonBuffer[0]== 1)
-//	  {
-//		  EndEffWrite();
-//	  }
-//	  ButtonBuffer[1] = ButtonBuffer[0];
-
+//***********General********************************
+	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+	  if (ButtonBuffer[1] == 0 && ButtonBuffer[0]== 1)
+	  {
+		  EndEffWrite();
+	  }
+	  ButtonBuffer[1] = ButtonBuffer[0];
+	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ; //Degree unit
+	  PWMgeneration() ; //Gen PWM
+//***************************************************
+//**********Get Real Vmax****************************
 	  float V;
 	  VelocityRPM = Velocity() ; //rpm unit
 	  if (VelocityRPM < 0)
@@ -324,9 +329,7 @@ UARTResetStart(&UART2);
 			  VmaxReal = VelocityRPM;
 		  }
 	  }
-
-	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ; //Degree unit
-	  PWMgeneration() ; //Gen PWM
+//*****************************************************
 //**********Set Home******************************
 	  if (StartSetHome == 1)
 	  {
@@ -336,13 +339,10 @@ UARTResetStart(&UART2);
 //**************PID******************************
 	  if (micros() - TimestampPID > 1000)
 	  {
-		  if (StartMoving || StartSetHome)
-		  {
-			  P = p;
-			  I = i;
-			  D = d;
-			  PID() ;
-		  }
+		  P = p;
+		  I = i;
+		  D = d;
+		  PID() ;
 		  TimestampPID = micros() ;
 	  }
 //************************************************
@@ -352,23 +352,55 @@ UARTResetStart(&UART2);
 	  {
 		  Protocal(inputChar, &UART2);
 	  }
+
+	  if (Mode == 8)
+	  {
+		  if (FinishedTask)
+		  {
+			  WriteACK2();
+		  }
+	  }
+	  if (Mode == 10) //Read ACK
+	  {
+		  int16_t inputChar = UARTReadChar(&UART2);
+		  if (inputChar != -1)
+		  {
+			  MainMemory[n] = inputChar ;
+			  n++ ;
+		  }
+	  }
+	  if (Mode == 11) //Read ACK
+	  {
+		  int16_t inputChar = UARTReadChar(&UART2);
+		  if (inputChar != -1)
+		  {
+			  MainMemory[n] = inputChar ;
+			  n++ ;
+		  }
+	  }
 	  if (Mode == 12)
 	  {
-		  EndEffWrite();
+		  enable_eff = 1;
 	  }
-
-	  if (Mode == 14)
+	  if (Mode == 13)
 	  {
-		  StartSetHome = 1 ; //Set home trigger
-		  //		  SetHomeFlag = 0;
+		  enable_eff = 0;
 	  }
 
-//********other**************
+//Mode 14 do in function protocal
+//	  if (Mode == 14)
+//	  {
+//
+//	  }
+
+
+//********Stop Motor***************************************
 	  if (request == 0)
 	  {
 		  Direction = 2 ;
 	  }
-//****************************
+//****************************************************
+//*******init Traj***********************************
 	  if (StartMoving == 0)
 	  {
 		  T = 0;
@@ -377,11 +409,28 @@ UARTResetStart(&UART2);
 		  ST = 0;
 //		  PIDinit();
 	  }
+//**************************************************
+//*******Start Generate Trajectory*******************
 	  if (StartMoving == 1)
 	  {
 		  Trajec();
 	  }
+	  if (FinishedTraj)
+	  {
+		  if (FinalPos - Degree < -0.5 || FinalPos - Degree > 0.5)
+		  {
+			  YangMaiTrong = 1;
+			  SUM = 0; //init second PID
+		  }
+		  else
+		  {
+			  EndEffWrite();
+		  }
 
+	  }
+
+
+//***************************************************
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -736,7 +785,7 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void EndEffWrite()
 {
-	if (hi2c1.State == HAL_I2C_STATE_READY)
+	if (hi2c1.State == HAL_I2C_STATE_READY && enable_eff)
 	{
 		HAL_Delay(500);
 		uint8_t temp = 0x45;
@@ -851,11 +900,7 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 	static uint8_t CurrentAngle2 = 0;
 
 	DataInTest = dataIn&0xf0;
-//	static uint8_t inst = 0;
-//
-//	static uint16_t CRCCheck = 0;
-//	static uint16_t packetSize = 0;
-//	static uint16_t CRC_accum;
+
 
 //	//State Machine
 	switch (State)
@@ -980,6 +1025,10 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 				{
 					WriteACK1();
 				}
+				if (Mode == 8) // Go to Station N
+				{
+					WriteACK1();
+				}
 				if (Mode == 10) //Decimal 4 degree
 				{
 					WriteACK1();
@@ -987,14 +1036,23 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 					CurrentAngle2 = (int8_t)((int)(Degree* 10000 * 3.14159265 / 180) % 256) ;
 					uint8_t temp[] = {CurrentAngle1, CurrentAngle2};
 					UARTTxWrite(&UART2, temp, 2);
-					//read Ack
+					n = 0;
+					//read Ack in while loop
 				}
 				if (Mode == 11)
 				{
 					WriteACK1();
+					uint8_t temp[] = {(int8_t)VmaxReal * 255 / 10};
+					UARTTxWrite(&UART2, temp, 1) ;
 					//send Vmax
-					//read Ack
+					n = 0;
+					//read Ack in while loop
 
+				}
+				if (Mode == 14)
+				{
+					StartSetHome = 1;
+					SetHomeFlag = 0;
 				}
 				State = Idle;
 			}
@@ -1041,198 +1099,35 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 		}
 
 		break;
-
-//	case Frame3_n:
-//		CollectedData = dataIn;
-//		n_Station = dataIn;
-//		State = Frame3_station;
-//		break;
-//	case Frame3_station:
-//		CollectedData -= 1 ;
-//		if (CollectedData != 0)
-//		{
-//			Station[10-CollectedData] = dataIn;
-//			State = Frame3_station;
-//		}
-//		else
-//		{
-//			State = CheckSum3 ;
-//		}
-//		break;
-//
-//	case CheckSum3:
-//		for (int i=0;i<10;i++)
-//		{
-//			stationSUM = stationSUM + Station[i];
-//		}
-//		checksumtest = CheckSumFunction(CheckSum, Frame, n_Station + stationSUM);
-//		break;
-
-
-//	case DNMXP_2ndHeader:
-//		if (dataIn == 0xFD)
-//			State = DNMXP_3rdHeader;
-//		else if (dataIn == 0xFF)
-//			; //do nothing
-//		else
-//			State = DNMXP_idle;
-//		break;
-//	case DNMXP_3rdHeader:
-//		if (dataIn == 0x00)
-//			State = DNMXP_Reserved;
-//		else
-//			State = DNMXP_idle;
-//		break;
-//	case DNMXP_Reserved:
-//		if ((dataIn == MotorID) | (dataIn == 0xFE))
-//			State = DNMXP_ID;
-//		else
-//			State = DNMXP_idle;
-//		break;
-//	case DNMXP_ID:
-//		datalen = dataIn & 0xFF;
-//		State = DNMXP_LEN1;
-//		break;
-//	case DNMXP_LEN1:
-//		datalen |= (dataIn & 0xFF) << 8;
-//		State = DNMXP_LEN2;
-//		break;
-//	case DNMXP_LEN2:
-//		inst = dataIn;
-//		State = DNMXP_Inst;
-//		break;
-//	case DNMXP_Inst:
-//		if (datalen > 3)
-//		{
-//			parameter[0] = dataIn;
-//			CollectedData = 1; //inst 1 + para[0] 1
-//			State = DNMXP_ParameterCollect;
-//		}
-//		else
-//		{
-//			CRCCheck = dataIn & 0xff;
-//			State = DNMXP_CRCAndExecute;
-//		}
-//
-//		break;
-//	case DNMXP_ParameterCollect:
-//
-//		if (datalen-3 > CollectedData)
-//		{
-//			parameter[CollectedData] = dataIn;
-//			CollectedData++;
-//		}
-//		else
-//		{
-//			CRCCheck = dataIn & 0xff;
-//			State = DNMXP_CRCAndExecute;
-//		}
-//		break;
-//	case DNMXP_CRCAndExecute:
-//		CRCCheck |= (dataIn & 0xff) << 8;
-//		//Check CRC
-//		CRC_accum = 0;
-//		packetSize = datalen + 7;
-//		//check overlapse buffer
-//		if (uart->RxTail - packetSize >= 0) //not overlapse
-//		{
-//			CRC_accum = update_crc(CRC_accum,
-//					&(uart->RxBuffer[uart->RxTail - packetSize]),
-//					packetSize - 2);
-//		}
-//		else//overlapse
-//		{
-//			uint16_t firstPartStart = uart->RxTail - packetSize + uart->RxLen;
-//			CRC_accum = update_crc(CRC_accum, &(uart->RxBuffer[firstPartStart]),
-//					uart->RxLen - firstPartStart);
-//			CRC_accum = update_crc(CRC_accum, uart->RxBuffer, uart->RxTail - 2);
-//
-//		}
-//
-//		if (CRC_accum == CRCCheck)
-//		{
-//			switch (inst)
-//			{
-//			case 0x01:// ping
-//			{
-//				//create packet template
-//				uint8_t temp[] =
-//				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x04, 0x00, 0x55,0x00, 0x00, 0x00};
-//				//config MotorID
-//				temp[4] = MotorID;
-//				//calcuate CRC
-//				uint16_t crc_calc = update_crc(0, temp, 9);
-//				temp[9] = crc_calc & 0xff;
-//				temp[10] = (crc_calc >> 8) & 0xFF;
-//				//Sent Response Packet
-//				UARTTxWrite(uart, temp, 11);
-//				break;
-//			}
-//
-//			case 0x02://READ
-//			{
-//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
-//				uint16_t numberOfDataToRead = (parameter[2]&0xFF)|(parameter[3]<<8 &0xFF);
-//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x00,0x00,0x55,0x00};
-//				temp[4] = MotorID;
-//				temp[5] = (numberOfDataToRead + 4) & 0xff ; // +inst+err+crc1+crc2
-//				temp[6] = ((numberOfDataToRead + 4)>>8) & 0xff ;
-//				uint16_t crc_calc = update_crc(0, temp, 9);
-//				crc_calc = update_crc(crc_calc ,&(Memory[startAddr]),numberOfDataToRead);
-//				uint8_t crctemp[2];
-//				crctemp[0] = crc_calc&0xff;
-//				crctemp[1] = (crc_calc>>8)&0xff;
-//				UARTTxWrite(uart, temp,9);
-//				UARTTxWrite(uart, &(Memory[startAddr]),numberOfDataToRead);
-//				UARTTxWrite(uart, crctemp,2);
-//				break;
-//			}
-//			case 0x03://WRITE
-//			{
-//				//LAB
-//				uint16_t startAddr = (parameter[0]&0xFF)|(parameter[1]<<8 &0xFF);
-//				uint16_t ParameterNumber = datalen - 5 ;
-//				for (int i = 0; i < ParameterNumber-1; i++)
-//				{
-//					Memory[startAddr + i] = parameter[i+1] ;
-//				}
-//				uint8_t temp[] = {0xff,0xff,0xfd,0x00,0x00,0x04,0x00,0x55,0x00};
-//				temp[4] = MotorID ;
-//				uint16_t crc_calc = update_crc(0, temp, 9);
-//				uint8_t crctemp[2];
-//				crctemp[0] = crc_calc&0xff;
-//				crctemp[1] = (crc_calc>>8)&0xff;
-//				UARTTxWrite(uart, temp,9);
-//				UARTTxWrite(uart, crctemp,2);
-//
-//			}
-////			default: //Unknown Inst
-////			{
-////				uint8_t temp[] =
-////				{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x02, 0x00,
-////						0x00 };
-////				temp[4] = MotorID;
-////				uint16_t crc_calc = update_crc(0, temp, 9);
-////				temp[9] = crc_calc & 0xff;
-////				temp[10] = (crc_calc >> 8) & 0xFF;
-////				UARTTxWrite(uart, temp, 11);
-////
-////				break;
-////			}
-//			}
-//		}
-//		else //crc error
-//		{
-//			uint8_t temp[] =
-//			{ 0xff, 0xff, 0xfd, 0x00, 0x00, 0x05, 0x00, 0x55, 0x03, 0x00, 0x00 };
-//			temp[4] = MotorID;
-//			uint16_t crc_calc = update_crc(0, temp, 9);
-//			temp[9] = crc_calc & 0xff;
-//			temp[10] = (crc_calc >> 8) & 0xFF;
-//			UARTTxWrite(uart, temp, 11);
-//		}
-//		State = DNMXP_idle;
-//		break;
+	case Frame3_n:
+		n_Station = dataIn;
+		State = Frame3_station;
+		break;
+	case Frame3_station:
+		if (n_Station > 0)
+		{
+			Station[via_point] = dataIn&0xf;
+			via_point++;
+			n_Station--;
+		}
+		if (n_Station==0)
+		{
+			State = Idle;
+			break;
+		}
+		if (n_Station>0)
+		{
+			Station[via_point] = (dataIn&0xf0)>>4;
+			via_point++;
+			n_Station--;
+			State = Frame3_station;
+		}
+		if (n_Station==0)
+		{
+			State = Idle;
+			break;
+		}
+		break;
 	}
 }
 
@@ -1297,7 +1192,8 @@ void SetHome()
 		{
 			request = 0;
 			htim3.Instance->CNT = 0;
-			SetHomeFlag = 3;
+			SetHomeFlag = 0;
+			StartSetHome = 0;
 		}
 	}
 }
@@ -1380,14 +1276,16 @@ void Trajec()
 	}
 	if (micros() - StartTime > (T*1000000)+500000)
 	{
-		if (Mode == 5)
-		{
-			WriteACK1();
-		}
-		EndEffWrite();
 		StartMoving = 0;
-		StartNstation -= 1 ;
-		movingTimestamp = micros();
+		FinishedTraj = 1;
+//		if (Mode == 5)
+//		{
+//			WriteACK1();
+//		}
+//		StartNstation -= 1 ;
+//		movingTimestamp = micros();
+//		FinishedStation++;
+
 
 
 //		MovingState = 1;
@@ -1447,6 +1345,33 @@ void PID()
 	preErr2 = preErr1 ;
 	preErr1 = error ;
 
+}
+
+void SecondPID()
+{
+	PP = 3;
+	II = 0.01;
+	DD = 1;
+	if (FinalPos - Degree < -350 && FinalPos > -360)
+	{
+		FinalPos = FinalPos + 360;
+	}
+	if (FinalPos - Degree > 350 && FinalPos <= 360)
+	{
+		FinalPos = FinalPos + 360;
+	}
+	if (FinalPos > Degree)
+	{
+		Direction = 0;
+	}
+	if (FinalPos < Degree)
+	{
+		Direction = 1;
+	}
+	float error = FinalPos - Degree;
+	SUM = SUM + error ;
+	PWMPercent = (PP*error) + (II*SUM) + (DD*(error - PPreerror)) ;
+	PPreerror = error;
 }
 
 //void PID()
