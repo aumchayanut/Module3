@@ -158,7 +158,8 @@ uint8_t FinishedStation = 0;
 uint8_t FinishedTask = 0;
 uint8_t NextStation = 0;
 uint8_t MovingState = 0;
-uint64_t movingTimestamp = 0;
+uint64_t effTimestamp = 0;
+uint8_t openeff = 0;
 
 //General
 float request = 0 ; //Velocity want to be
@@ -300,8 +301,12 @@ UARTResetStart(&UART2);
 	  uint8_t GoToStation[] = {7,1,4,5,9};
 	  if (FinishedStation)
 	  {
-		  NextStation++;
-		  FinishedStation = 0;
+		  if (micros() - effTimestamp > 5000000)
+		  {
+			  NextStation++;
+			  FinishedStation = 0;
+			  StartMoving = 1;
+		  }
 	  }
 	  FinalPos = Station[GoToStation[NextStation]];
 	  MovingState = *(&GoToStation + 1) - GoToStation;
@@ -309,6 +314,7 @@ UARTResetStart(&UART2);
 	  {
 		  FinishedTask = 1;
 		  NextStation = 0;
+		  StartMoving = 0;
 	  }
 
 //***********General********************************
@@ -491,7 +497,8 @@ UARTResetStart(&UART2);
 			  StartMoving = 0;
 			  Statee = InitPID;
 			  Vi = 0;
-
+			  effTimestamp = micros();
+			  EndEffWrite();
 			  break;
 		  }
 
