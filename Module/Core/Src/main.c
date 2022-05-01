@@ -85,6 +85,11 @@ typedef enum
 	Frame3_station,
 	CheckSum2,
 	CheckSum3,
+	InitPID,
+	Traj,
+	Trong,
+	YangMaiTrong,
+	Finished,
 
 } State;
 uint8_t Mode = 0;
@@ -109,7 +114,10 @@ float D = 0;
 float p = 47.8125;
 float i = 12.8525;
 float d = 10;
-float PP,II,DD,SUM,PPreerror;
+float SUM,PPreerror;
+float PP = 8;
+float II = 0.01;
+float DD = 1;
 
 //Traj
 float StartTime ; //Start moving time
@@ -127,10 +135,9 @@ uint64_t Trajtimestamp;
 uint8_t via_point = 0;
 float VmaxRPM = 10 ; //rpm
 float VmaxReal = 0;
-uint8_t YangMaiTrong = 0;
-uint8_t FinishedTraj = 0;
-uint64_t Trong1Vi = 0;
+uint8_t FinishedTraj = 0 ;
 uint8_t Vi = 0;
+uint64_t Trong1Vi = 0;
 
 
 //Set Home
@@ -146,6 +153,12 @@ uint8_t home = 0;
 uint64_t TimestampEncoder = 0 ;//period of low pass read velocity
 float EncoderVel = 0 ; //Velovity after low pass
 
+//N station
+uint8_t FinishedStation = 0;
+uint8_t FinishedTask = 0;
+uint8_t NextStation = 0;
+uint8_t MovingState = 0;
+uint64_t movingTimestamp = 0;
 
 //General
 float request = 0 ; //Velocity want to be
@@ -155,8 +168,8 @@ float VelocityRPM ; //velocity RPM unit
 float Degree = 0 ; //Position Degree unit
 uint8_t Direction = 0 ; //0 CW - 1 CCW - 2 Stop
 uint8_t ButtonBuffer[2] = {0} ; //Blue button
-uint8_t FinishedStation = 0;
-uint8_t FinishedTask = 0;
+
+
 
 uint16_t EndEffStatus = 0 ;
 uint8_t test = 0;
@@ -165,10 +178,7 @@ uint8_t frame2 = 0;
 uint8_t frame3 = 0;
 uint16_t DataInTest = 0 ;
 uint8_t checksumtest = 0;
-uint8_t ReachedStation = 0;
-uint8_t StartNstation = 10;
-uint8_t MovingState = 0;
-uint64_t movingTimestamp = 0;
+
 
 /* USER CODE END PV */
 
@@ -277,33 +287,35 @@ UARTResetStart(&UART2);
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  Station[0] = 45;
-//	  Station[1] = 360;
-//	  Station[2] = 25;
-//	  Station[3] = 30;
-//	  Station[4] = 45;
-//	  Station[5] = 270;
-//	  Station[6] = 45;
-//	  Station[7] = 90;
-//	  Station[8] = 270;
-//	  Station[9] = 0;
-//	  if (StartNstation!=0)
-//	  {
-//		  if (micros() - movingTimestamp >= 5000000)
-//		  {
-//			  StartMoving = 1 ;
-//		  }
-//	  }
-//
-//	  if (StartNstation != 0)
-//	  {
-//		  FinalPos = Station[FinishedStation];
-//	  }
+	  Station[0] = 45;
+	  Station[1] = 360;
+	  Station[2] = 25;
+	  Station[3] = 30;
+	  Station[4] = 45;
+	  Station[5] = 270;
+	  Station[6] = 45;
+	  Station[7] = 90;
+	  Station[8] = 270;
+	  Station[9] = 0;
+	  uint8_t GoToStation[] = {7,1,4,5,9};
+	  if (FinishedStation)
+	  {
+		  NextStation++;
+		  FinishedStation = 0;
+	  }
+	  FinalPos = Station[GoToStation[NextStation]];
+	  MovingState = *(&GoToStation + 1) - GoToStation;
+	  if (NextStation >= MovingState)
+	  {
+		  FinishedTask = 1;
+		  NextStation = 0;
+	  }
 
 //***********General********************************
 	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
-	  if (ButtonBuffer[1] == 0 && ButtonBuffer[0]== 1)
+	  if (ButtonBuffer[1] == 1 && ButtonBuffer[0]== 0)
 	  {
+		  test ++;
 		  EndEffWrite();
 	  }
 	  ButtonBuffer[1] = ButtonBuffer[0];
@@ -331,21 +343,22 @@ UARTResetStart(&UART2);
 	  }
 //*****************************************************
 //**********Set Home******************************
-	  if (StartSetHome == 1)
+	  if (StartSetHome)
 	  {
 		  SetHome() ;
+		  //**************PID******************************
+		  if (micros() - TimestampPID > 1000)
+		  {
+			  P = p;
+			  I = i;
+			  D = d;
+			  PID() ;
+			  TimestampPID = micros() ;
+		  }
+		  //************************************************
 	  }
 //***********************************************
-//**************PID******************************
-	  if (micros() - TimestampPID > 1000)
-	  {
-		  P = p;
-		  I = i;
-		  D = d;
-		  PID() ;
-		  TimestampPID = micros() ;
-	  }
-//************************************************
+
 //**************UART******************************
 	  int16_t inputChar = UARTReadChar(&UART2);
 	  if (inputChar != -1)
@@ -394,37 +407,92 @@ UARTResetStart(&UART2);
 //	  }
 
 
-//********Stop Motor***************************************
-	  if (request == 0)
-	  {
-		  Direction = 2 ;
-	  }
 //****************************************************
 //*******init Traj***********************************
-	  if (StartMoving == 0)
+	  if (StartMoving == 0 && StartSetHome == 0)
 	  {
 		  T = 0;
 		  TV = 0;
 		  TA = 0;
 		  ST = 0;
-//		  PIDinit();
+		  Direction = 2;
+
 	  }
 //**************************************************
 //*******Start Generate Trajectory*******************
+
 	  if (StartMoving == 1)
 	  {
-		  Trajec();
-	  }
-	  if (FinishedTraj)
-	  {
-		  if (FinalPos - Degree < -0.5 || FinalPos - Degree > 0.5)
+		  static State Statee = InitPID;
+		  switch(Statee)
 		  {
-			  YangMaiTrong = 1;
-			  SUM = 0; //init second PID
-		  }
-		  else
-		  {
-			  EndEffWrite();
+		  case InitPID:
+			  PIDinit();
+			  Statee = Traj;
+			  break;
+		  case Traj:
+			  //**************PID******************************
+			  if (micros() - TimestampPID > 1000)
+			  {
+				  P = p;
+				  I = i;
+				  D = d;
+				  PID() ;
+				  TimestampPID = micros() ;
+			  }
+			  //************************************************
+			  Trajec();
+			  if (FinishedTraj)
+			  {
+				  if (FinalPos - Degree > 0.5 || FinalPos - Degree < -0.5)
+				  {
+					  if (FinalPos - Degree >= 359.5 || FinalPos - Degree <= -359.5)
+					  {
+						  Statee = Trong;
+						  FinishedTraj = 0;
+					  }
+					  else
+					  {
+						  Statee = YangMaiTrong;
+						  SUM = 0;
+						  FinishedTraj = 0;
+					  }
+
+				  }
+				  else
+				  {
+					  Statee = Trong;
+					  FinishedTraj = 0;
+				  }
+			  }
+			  break;
+		  case YangMaiTrong:
+			  SecondPID();
+			  if (FinalPos - Degree < 0.5 && FinalPos - Degree > -0.5)
+			  {
+				  Vi = 1;
+			  }
+			  if (FinalPos - Degree >= 359.5 && FinalPos - Degree > -359.5)
+			  {
+				  Vi = 1;
+			  }
+			  if (Vi == 0)
+			  {
+				  Trong1Vi = micros();
+			  }
+			  if (micros() - Trong1Vi > 500000 && Vi)
+			  {
+				  Statee = Trong;
+			  }
+			  break;
+		  case Trong:
+			  request = 0;
+			  FinishedStation = 1;
+			  StartMoving = 0;
+			  Statee = InitPID;
+			  Vi = 0;
+
+			  break;
 		  }
 
 	  }
@@ -787,18 +855,14 @@ void EndEffWrite()
 {
 	if (hi2c1.State == HAL_I2C_STATE_READY && enable_eff)
 	{
+		test ++;
 		HAL_Delay(500);
 		uint8_t temp = 0x45;
 		uint8_t add = 0x23;
 		HAL_I2C_Master_Transmit(&hi2c1, add << 1, &temp, 1, 1000); //Write eff
-//		HAL_I2C_Master_Transmit_IT(&hi2c1, 0x23<<1, 0x45, 1);
 	}
 
 }
-//void GoToGoal(float goal)
-//{
-//
-//}
 
 void UARTInit(UARTStucrture *uart)
 {
@@ -1074,7 +1138,6 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 		break;
 	case CheckSum2:
 		frame2 = dataIn;
-		test = CheckSum + CollectedData + CollectedData2;//test
 		checksumtest = CheckSumFunction(CheckSum, Frame, CollectedData + CollectedData2);
 		if (frame2 == checksumtest)
 		{
@@ -1171,6 +1234,7 @@ void SetHome()
 	if (SetHomeFlag == 0)
 	{
 		request = 5;
+		Direction = 0;
 		if (sum > 0)
 		{
 			SetHomeFlag = 1;
@@ -1180,6 +1244,7 @@ void SetHome()
 	if (SetHomeFlag == 1)
 	{
 		request = 0;
+		Direction = 2;
 		if (micros()-SetHomeTimeStamp > 1000000)
 		{
 			SetHomeFlag = 2;
@@ -1188,6 +1253,7 @@ void SetHome()
 	if (SetHomeFlag == 2)
 	{
 		request = -0.5;
+		Direction = 1;
 		if (sum > 0)
 		{
 			request = 0;
@@ -1276,26 +1342,7 @@ void Trajec()
 	}
 	if (micros() - StartTime > (T*1000000)+500000)
 	{
-		StartMoving = 0;
 		FinishedTraj = 1;
-//		if (Mode == 5)
-//		{
-//			WriteACK1();
-//		}
-//		StartNstation -= 1 ;
-//		movingTimestamp = micros();
-//		FinishedStation++;
-
-
-
-//		MovingState = 1;
-//
-//		if (StartNstation == -1)
-//		{
-//			StartMoving = 0;
-//			StartNstation = 10;
-//		}
-
 	}
 
 }
@@ -1349,96 +1396,38 @@ void PID()
 
 void SecondPID()
 {
-	PP = 3;
-	II = 0.01;
-	DD = 1;
-	if (FinalPos - Degree < -350 && FinalPos > -360)
-	{
-		FinalPos = FinalPos + 360;
-	}
-	if (FinalPos - Degree > 350 && FinalPos <= 360)
-	{
-		FinalPos = FinalPos + 360;
-	}
+	float final,now;
+	final = FinalPos;
+	now = Degree;
+	float error;
 	if (FinalPos > Degree)
 	{
 		Direction = 0;
+		error = final - now;
 	}
 	if (FinalPos < Degree)
 	{
 		Direction = 1;
+		error = now - final;
 	}
-	float error = FinalPos - Degree;
+	if (FinalPos - Degree < -350)
+	{
+		final = FinalPos + 360;
+		Direction = 0;
+		error = final - now;
+	}
+
+	if (FinalPos - Degree > 350)
+	{
+		now = Degree + 360;
+		Direction = 1;
+		error = now - final;
+	}
+
 	SUM = SUM + error ;
 	PWMPercent = (PP*error) + (II*SUM) + (DD*(error - PPreerror)) ;
 	PPreerror = error;
 }
-
-//void PID()
-//{
-////	P = 60 ;
-////	I = 1500 ;
-////	D = 30 ;
-//	Tau = 0.2 ;
-//	float req,Vel ;
-//	if (request < 0)
-//	{
-//		req = - request ;
-//		Vel = - VelocityRPM ;
-//		Direction = 1 ;
-//	}
-//	if (request > 0)
-//	{
-//		req = request ;
-//		Vel = VelocityRPM ;
-//		Direction = 0 ;
-//	}
-//	float error = req - Vel ;
-//	Propotional = P * error ;
-//	Integrator = Integrator + (0.5 * I * SampleTime * (error + preErr1)) ;
-//
-//	//********Anti Windup*************
-//	float maxInt,minInt ;
-//	if (Propotional < 10000)
-//	{
-//		maxInt = 10000 - Propotional ;
-//	}
-//	else
-//	{
-//		maxInt = 0 ;
-//	}
-//	if (Propotional > 0)
-//	{
-//		minInt = 0 - Propotional ;
-//	}
-//	else
-//	{
-//		minInt = 0 ;
-//	}
-//	//********************************
-//	if (Integrator > maxInt)
-//	{
-//		Integrator = maxInt ;
-//	}
-//	else if (Integrator < minInt)
-//	{
-//		Integrator = minInt ;
-//	}
-//
-//	Differentiator = (2*D*(VelocityRPM - preVel)) + (Differentiator * (2*Tau - SampleTime)) / (2 * Tau + SampleTime) ;
-//
-//	PWMPercent = Propotional + Integrator + Differentiator + InitialPWM;
-//	if (PWMPercent > 10000)
-//	{
-//		PWMPercent = 10000 ;
-//	}
-//	if (PWMPercent < 0)
-//	{
-//		PWMPercent = 0 ;
-//	}
-//	preErr1 = error ;
-//	preVel = Vel ;
-//}
 
 
 float Velocity()
