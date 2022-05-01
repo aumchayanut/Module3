@@ -115,8 +115,8 @@ float p = 47.8125;
 float i = 12.8525;
 float d = 10;
 float SUM,PPreerror;
-float PP = 8;
-float II = 0.01;
+float PP = 40;
+float II = 0.03;
 float DD = 1;
 
 //Traj
@@ -157,9 +157,10 @@ float EncoderVel = 0 ; //Velovity after low pass
 uint8_t FinishedStation = 0;
 uint8_t FinishedTask = 0;
 uint8_t NextStation = 0;
-uint8_t MovingState = 0;
+uint8_t HowMuchStation = 0;
 uint64_t effTimestamp = 0;
 uint8_t openeff = 0;
+uint8_t GoToStation[10] = {0};
 
 //General
 float request = 0 ; //Velocity want to be
@@ -288,17 +289,16 @@ UARTResetStart(&UART2);
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  Station[0] = 45;
-	  Station[1] = 360;
-	  Station[2] = 25;
-	  Station[3] = 30;
-	  Station[4] = 45;
-	  Station[5] = 270;
-	  Station[6] = 45;
-	  Station[7] = 90;
-	  Station[8] = 270;
-	  Station[9] = 0;
-	  uint8_t GoToStation[] = {7,1,4,5,9};
+//	  Station[0] = 45;
+//	  Station[1] = 360;
+//	  Station[2] = 25;
+//	  Station[3] = 30;
+//	  Station[4] = 45;
+//	  Station[5] = 270;
+//	  Station[6] = 45;
+//	  Station[7] = 90;
+//	  Station[8] = 270;
+//	  Station[9] = 0;
 	  if (FinishedStation)
 	  {
 		  if (micros() - effTimestamp > 5000000)
@@ -309,11 +309,10 @@ UARTResetStart(&UART2);
 		  }
 	  }
 	  FinalPos = Station[GoToStation[NextStation]];
-	  MovingState = *(&GoToStation + 1) - GoToStation;
-	  if (NextStation >= MovingState)
+	  if (NextStation >= HowMuchStation && StartMoving)
 	  {
+//		  NextStation = 0;
 		  FinishedTask = 1;
-		  NextStation = 0;
 		  StartMoving = 0;
 	  }
 
@@ -372,13 +371,13 @@ UARTResetStart(&UART2);
 		  Protocal(inputChar, &UART2);
 	  }
 
-	  if (Mode == 8)
-	  {
-		  if (FinishedTask)
-		  {
-			  WriteACK2();
-		  }
-	  }
+//	  if (Mode == 8)
+//	  {
+//		  if (FinishedTask)
+//		  {
+//			  WriteACK2();
+//		  }
+//	  }
 	  if (Mode == 10) //Read ACK
 	  {
 		  int16_t inputChar = UARTReadChar(&UART2);
@@ -1099,25 +1098,56 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 				if (Mode == 8) // Go to Station N
 				{
 					WriteACK1();
+					StartMoving = 1;
+					NextStation = 0;
+					FinishedTask = 0;
+				}
+				if (Mode == 9)
+				{
+					//send current station**************************************************************************
+					if (FinishedTask)
+					{
+						WriteACK2();
+					}
+					else
+					{
+						WriteACK1();
+						uint8_t temp[] = {153,0,GoToStation[NextStation],CheckSumFunction(153, 2, GoToStation[NextStation])};
+						UARTTxWrite(&UART2, temp, 4) ;
+					}
 				}
 				if (Mode == 10) //Decimal 4 degree
 				{
-					WriteACK1();
-					CurrentAngle1 = (int8_t)(Degree * 10000 * 3.14159265 / 256 /180) ;
-					CurrentAngle2 = (int8_t)((int)(Degree* 10000 * 3.14159265 / 180) % 256) ;
-					uint8_t temp[] = {CurrentAngle1, CurrentAngle2};
-					UARTTxWrite(&UART2, temp, 2);
-					n = 0;
-					//read Ack in while loop
+					if (FinishedTask)
+					{
+						WriteACK2();
+					}
+					else
+					{
+						WriteACK1();
+						CurrentAngle1 = (int8_t)(Degree * 10000 * 3.14159265 / 256 /180) ;
+						CurrentAngle2 = (int8_t)((int)(Degree* 10000 * 3.14159265 / 180) % 256) ;
+						uint8_t temp[] = {154,CurrentAngle1, CurrentAngle2,CheckSumFunction(154, 2, CurrentAngle1+CurrentAngle2)};
+						UARTTxWrite(&UART2, temp, 4);
+						n = 0;
+						//read Ack in while loop
+					}
 				}
-				if (Mode == 11)
+				if (Mode == 11) //error; send now speed and top speed
 				{
-					WriteACK1();
-					uint8_t temp[] = {(int8_t)VmaxReal * 255 / 10};
-					UARTTxWrite(&UART2, temp, 1) ;
-					//send Vmax
-					n = 0;
-					//read Ack in while loop
+					if (FinishedTask)
+					{
+						WriteACK2();
+					}
+					else
+					{
+						WriteACK1();
+						uint8_t temp[] = {155,0,(int8_t)VmaxReal * 255 / 10,CheckSumFunction(155, 2, (int8_t)VmaxReal * 255 / 10)};
+						UARTTxWrite(&UART2, temp, 4) ;
+						//send Vmax
+						n = 0;
+						//read Ack in while loop
+					}
 
 				}
 				if (Mode == 14)
@@ -1156,8 +1186,20 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 			}
 			if (Mode == 5)
 			{
-				FinalPos = (((double)CollectedData * 256) + ((double)CollectedData2))/10000/3.14159265*180;
+				Station[0] = (((double)CollectedData * 256) + ((double)CollectedData2))/10000/3.14159265*180;
+				GoToStation[0] = 0;
+				HowMuchStation = 1;
 				WriteACK1();
+			}
+			if (Mode == 6)
+			{
+				GoToStation[0] = dataIn;
+				HowMuchStation = 1;
+				WriteACK1();
+			}
+			if (Mode == 7)
+			{
+				//recieved n station
 			}
 
 			State = Idle;
@@ -1174,29 +1216,6 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 		State = Frame3_station;
 		break;
 	case Frame3_station:
-		if (n_Station > 0)
-		{
-			Station[via_point] = dataIn&0xf;
-			via_point++;
-			n_Station--;
-		}
-		if (n_Station==0)
-		{
-			State = Idle;
-			break;
-		}
-		if (n_Station>0)
-		{
-			Station[via_point] = (dataIn&0xf0)>>4;
-			via_point++;
-			n_Station--;
-			State = Frame3_station;
-		}
-		if (n_Station==0)
-		{
-			State = Idle;
-			break;
-		}
 		break;
 	}
 }
