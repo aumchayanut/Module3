@@ -89,7 +89,9 @@ typedef enum
 	Traj,
 	Trong,
 	YangMaiTrong,
-	Finished,
+//	Finished,
+	half_traj,
+	final_traj,
 
 } State;
 uint8_t Mode = 0;
@@ -115,9 +117,10 @@ float p = 47.8125;
 float i = 12.8525;
 float d = 10;
 float SUM,PPreerror;
-float PP = 40;
-float II = 0.03;
+float PP = 10;
+float II = 0.5;
 float DD = 1;
+uint64_t secondpidTS = 0;
 
 //Traj
 float StartTime ; //Start moving time
@@ -138,6 +141,7 @@ float VmaxReal = 0;
 uint8_t FinishedTraj = 0 ;
 uint8_t Vi = 0;
 uint64_t Trong1Vi = 0;
+float finally = 0;
 
 
 //Set Home
@@ -426,6 +430,76 @@ UARTResetStart(&UART2);
 //**************************************************
 //*******Start Generate Trajectory*******************
 
+//	  if (StartMoving)
+//	  {
+//		  static State Statee = InitPID;
+//		  switch(Statee)
+//		  {
+//		  case InitPID:
+//			  PIDinit();
+//			  if (FinalPos - Degree > 90 && FinalPos - Degree < 180)
+//			  {
+//				  finally = FinalPos - (FinalPos-Degree)/2 ;
+//				  Statee = half_traj;
+//			  }
+//			  if (FinalPos - Degree < -90 && FinalPos - Degree > -180)
+//			  {
+//				  finally = FinalPos - (FinalPos - Degree)/2 ;
+//				  Statee = half_traj;
+//			  }
+//			  if (FinalPos - Degree > 180 && FinalPos - Degree < 270)
+//			  {
+//				  finally = (FinalPos + (Degree + 360 - FinalPos)/2) ;
+//				  Statee = half_traj;
+//			  }
+//			  if (FinalPos - Degree < -180 && FinalPos - Degree > -270)
+//			  {
+//				  finally = (FinalPos - (FinalPos + 360 - Degree)/2) ;
+//				  Statee = half_traj;
+//			  }
+//			  else
+//			  {
+//				  Statee = final_traj;
+//			  }
+//			  break;
+//		  case half_traj:
+//			  if (micros() - TimestampPID > 1000)
+//			  {
+//				  P = p;
+//				  I = i;
+//				  D = d;
+//				  PID() ;
+//				  TimestampPID = micros() ;
+//			  }
+//			  //************************************************
+//			  FinalPos = finally;
+//			  Trajec();
+//			  if (FinishedTraj)
+//			  {
+//				  FinishedTraj = 0;
+//				  Statee = final_traj;
+//				  PIDinit();
+//			  }
+//			  break;
+//		  case final_traj :
+//			  if (micros() - TimestampPID > 1000)
+//			  {
+//				  P = p;
+//				  I = i;
+//				  D = d;
+//				  PID() ;
+//				  TimestampPID = micros() ;
+//			  }
+//			  //************************************************
+//			  Trajec();
+//			  if (FinishedTraj)
+//			  {
+//				  FinishedTraj = 0;
+//				  Statee = InitPID;
+//			  }
+//			  break;
+//	  }
+//  }
 	  if (StartMoving == 1)
 	  {
 		  static State Statee = InitPID;
@@ -459,8 +533,11 @@ UARTResetStart(&UART2);
 					  else
 					  {
 						  Statee = YangMaiTrong;
-						  SUM = 0;
+//						  SUM = 0;
+//						  PPreerror = 0;
 						  FinishedTraj = 0;
+						  //test//
+						  PIDinit();
 					  }
 
 				  }
@@ -472,13 +549,26 @@ UARTResetStart(&UART2);
 			  }
 			  break;
 		  case YangMaiTrong:
-			  SecondPID();
-			  if (FinalPos - Degree < 0.5 && FinalPos - Degree > -0.5)
+			  //test//
+			  if (FinalPos < Degree)
 			  {
-				  Vi = 1;
+				  request = 0.5;
 			  }
-			  if (FinalPos - Degree >= 359.5 && FinalPos - Degree > -359.5)
+			  if (FinalPos > Degree)
 			  {
+				  request = - 0.5;
+			  }
+			  if (FinalPos - Degree > 300)
+			  {
+				  request = 0.5;
+			  }
+			  if (FinalPos - Degree < -300)
+			  {
+				  request = -0.5;
+			  }
+			  if (FinalPos - Degree < 0.2 || FinalPos - Degree > -0.2)
+			  {
+				  request = 0;
 				  Vi = 1;
 			  }
 			  if (Vi == 0)
@@ -489,15 +579,48 @@ UARTResetStart(&UART2);
 			  {
 				  Statee = Trong;
 			  }
+			  if (micros() - TimestampPID > 1000)
+			  {
+				  P = p;
+				  I = i;
+				  D = d;
+				  PID() ;
+				  TimestampPID = micros() ;
+			  }
+
+			  //*********************
+//			  if (micros() - secondpidTS >= 1000)
+//			  {
+//				  SecondPID();
+//				  secondpidTS = micros();
+//			  }
+//
+//			  if (FinalPos - Degree < 0.3 && FinalPos - Degree > -0.3)
+//			  {
+//				  Vi = 1;
+//			  }
+//			  if (FinalPos - Degree >= 359.7 && FinalPos - Degree > -359.7)
+//			  {
+//				  Vi = 1;
+//			  }
+//			  if (Vi == 0)
+//			  {
+//				  Trong1Vi = micros();
+//			  }
+//			  if (micros() - Trong1Vi > 500000 && Vi)
+//			  {
+//				  Statee = Trong;
+//			  }
 			  break;
 		  case Trong:
-			  request = 0;
-			  FinishedStation = 1;
-			  StartMoving = 0;
-			  Statee = InitPID;
-			  Vi = 0;
-			  effTimestamp = micros();
-			  EndEffWrite();
+			request = 0;
+			PWMPercent = 0;
+			FinishedStation = 1;
+			StartMoving = 0;
+			Statee = InitPID;
+			Vi = 0;
+			effTimestamp = micros();
+			EndEffWrite();
 			  break;
 		  }
 
@@ -574,7 +697,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 10000;
+  hi2c1.Init.ClockSpeed = 100000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -859,7 +982,8 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void EndEffWrite()
 {
-	if (hi2c1.State == HAL_I2C_STATE_READY && enable_eff)
+//	if (hi2c1.State == HAL_I2C_STATE_READY && enable_eff)
+	if (hi2c1.State == HAL_I2C_STATE_READY)
 	{
 		test ++;
 		HAL_Delay(500);
