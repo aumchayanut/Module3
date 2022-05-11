@@ -118,7 +118,7 @@ float i = 12.8525;
 float d = 10;
 float SUM,PPreerror;
 float PP = 10;
-float II = 0.5;
+float II = 0.3;
 float DD = 1;
 uint64_t secondpidTS = 0;
 
@@ -185,6 +185,8 @@ uint8_t frame3 = 0;
 uint16_t DataInTest = 0 ;
 uint8_t checksumtest = 0;
 
+uint8_t stateeee = 0;
+float V;
 
 /* USER CODE END PV */
 
@@ -303,6 +305,9 @@ UARTResetStart(&UART2);
 //	  Station[7] = 90;
 //	  Station[8] = 270;
 //	  Station[9] = 0;
+
+	  //*************When reach station********************
+	  //Open End-eff
 	  if (FinishedStation)
 	  {
 		  if (micros() - effTimestamp > 5000000)
@@ -312,45 +317,47 @@ UARTResetStart(&UART2);
 			  StartMoving = 1;
 		  }
 	  }
+	  //Get next station
 	  FinalPos = Station[GoToStation[NextStation]];
+	  //*****************************************************************
 	  if (NextStation >= HowMuchStation && StartMoving)
 	  {
 //		  NextStation = 0;
 		  FinishedTask = 1;
 		  StartMoving = 0;
 	  }
-
 //***********General********************************
 	  ButtonBuffer[0] = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
 	  if (ButtonBuffer[1] == 1 && ButtonBuffer[0]== 0)
 	  {
-		  test ++;
 		  EndEffWrite();
 	  }
 	  ButtonBuffer[1] = ButtonBuffer[0];
 	  Degree = htim3.Instance->CNT * 360.0 / 2048.0 ; //Degree unit
 	  PWMgeneration() ; //Gen PWM
 //***************************************************
-//**********Get Real Vmax****************************
-	  float V;
+////**********Get Real Vmax****************************
+
 	  VelocityRPM = Velocity() ; //rpm unit
 	  if (VelocityRPM < 0)
 	  {
-		  V = (-1) * VelocityRPM;
-		  if (V > VmaxReal)
-		  {
-			  VmaxReal = VelocityRPM;
-		  }
+//		  V = (-1) * VelocityRPM;
+//		  if (V > VmaxReal)
+//		  {
+//			  VmaxReal = VelocityRPM;
+//		  }
+		  VmaxReal = -VelocityRPM;
 	  }
 	  else
 	  {
-		  V = VelocityRPM;
-		  if (V > VmaxReal)
-		  {
-			  VmaxReal = VelocityRPM;
-		  }
+//		  V = VelocityRPM;
+//		  if (V > VmaxReal)
+//		  {
+//			  VmaxReal = VelocityRPM;
+//		  }
+		  VmaxReal = VelocityRPM;
 	  }
-//*****************************************************
+////*****************************************************
 //**********Set Home******************************
 	  if (StartSetHome)
 	  {
@@ -374,32 +381,38 @@ UARTResetStart(&UART2);
 	  {
 		  Protocal(inputChar, &UART2);
 	  }
-
-//	  if (Mode == 8)
+	  if (FinishedTask)
+	  {
+		  WriteACK2();
+		  FinishedTask = 0;
+	  }
+//	  if(Mode == 9)
 //	  {
-//		  if (FinishedTask)
+//		  int16_t inputChar = UARTReadChar(&UART2);
+//		  if (inputChar != -1)
 //		  {
-//			  WriteACK2();
+//			  MainMemory[n] = inputChar ;
+//			  n++ ;
 //		  }
 //	  }
-	  if (Mode == 10) //Read ACK
-	  {
-		  int16_t inputChar = UARTReadChar(&UART2);
-		  if (inputChar != -1)
-		  {
-			  MainMemory[n] = inputChar ;
-			  n++ ;
-		  }
-	  }
-	  if (Mode == 11) //Read ACK
-	  {
-		  int16_t inputChar = UARTReadChar(&UART2);
-		  if (inputChar != -1)
-		  {
-			  MainMemory[n] = inputChar ;
-			  n++ ;
-		  }
-	  }
+//	  if (Mode == 10) //Read ACK
+//	  {
+//		  int16_t inputChar = UARTReadChar(&UART2);
+//		  if (inputChar != -1)
+//		  {
+//			  MainMemory[n] = inputChar ;
+//			  n++ ;
+//		  }
+//	  }
+//	  if (Mode == 11) //Read ACK
+//	  {
+//		  int16_t inputChar = UARTReadChar(&UART2);
+//		  if (inputChar != -1)
+//		  {
+//			  MainMemory[n] = inputChar ;
+//			  n++ ;
+//		  }
+//	  }
 	  if (Mode == 12)
 	  {
 		  enable_eff = 1;
@@ -429,77 +442,6 @@ UARTResetStart(&UART2);
 	  }
 //**************************************************
 //*******Start Generate Trajectory*******************
-
-//	  if (StartMoving)
-//	  {
-//		  static State Statee = InitPID;
-//		  switch(Statee)
-//		  {
-//		  case InitPID:
-//			  PIDinit();
-//			  if (FinalPos - Degree > 90 && FinalPos - Degree < 180)
-//			  {
-//				  finally = FinalPos - (FinalPos-Degree)/2 ;
-//				  Statee = half_traj;
-//			  }
-//			  if (FinalPos - Degree < -90 && FinalPos - Degree > -180)
-//			  {
-//				  finally = FinalPos - (FinalPos - Degree)/2 ;
-//				  Statee = half_traj;
-//			  }
-//			  if (FinalPos - Degree > 180 && FinalPos - Degree < 270)
-//			  {
-//				  finally = (FinalPos + (Degree + 360 - FinalPos)/2) ;
-//				  Statee = half_traj;
-//			  }
-//			  if (FinalPos - Degree < -180 && FinalPos - Degree > -270)
-//			  {
-//				  finally = (FinalPos - (FinalPos + 360 - Degree)/2) ;
-//				  Statee = half_traj;
-//			  }
-//			  else
-//			  {
-//				  Statee = final_traj;
-//			  }
-//			  break;
-//		  case half_traj:
-//			  if (micros() - TimestampPID > 1000)
-//			  {
-//				  P = p;
-//				  I = i;
-//				  D = d;
-//				  PID() ;
-//				  TimestampPID = micros() ;
-//			  }
-//			  //************************************************
-//			  FinalPos = finally;
-//			  Trajec();
-//			  if (FinishedTraj)
-//			  {
-//				  FinishedTraj = 0;
-//				  Statee = final_traj;
-//				  PIDinit();
-//			  }
-//			  break;
-//		  case final_traj :
-//			  if (micros() - TimestampPID > 1000)
-//			  {
-//				  P = p;
-//				  I = i;
-//				  D = d;
-//				  PID() ;
-//				  TimestampPID = micros() ;
-//			  }
-//			  //************************************************
-//			  Trajec();
-//			  if (FinishedTraj)
-//			  {
-//				  FinishedTraj = 0;
-//				  Statee = InitPID;
-//			  }
-//			  break;
-//	  }
-//  }
 	  if (StartMoving == 1)
 	  {
 		  static State Statee = InitPID;
@@ -523,9 +465,9 @@ UARTResetStart(&UART2);
 			  Trajec();
 			  if (FinishedTraj)
 			  {
-				  if (FinalPos - Degree > 0.5 || FinalPos - Degree < -0.5)
+				  if (FinalPos - Degree > 0.1 || FinalPos - Degree < -0.1)
 				  {
-					  if (FinalPos - Degree >= 359.5 || FinalPos - Degree <= -359.5)
+					  if (FinalPos - Degree >= 359.9 || FinalPos - Degree <= -359.9)
 					  {
 						  Statee = Trong;
 						  FinishedTraj = 0;
@@ -533,10 +475,7 @@ UARTResetStart(&UART2);
 					  else
 					  {
 						  Statee = YangMaiTrong;
-//						  SUM = 0;
-//						  PPreerror = 0;
 						  FinishedTraj = 0;
-						  //test//
 						  PIDinit();
 					  }
 
@@ -549,35 +488,39 @@ UARTResetStart(&UART2);
 			  }
 			  break;
 		  case YangMaiTrong:
-			  //test//
-			  if (FinalPos < Degree)
-			  {
-				  request = 0.5;
-			  }
-			  if (FinalPos > Degree)
-			  {
-				  request = - 0.5;
-			  }
-			  if (FinalPos - Degree > 300)
-			  {
-				  request = 0.5;
-			  }
-			  if (FinalPos - Degree < -300)
+			  if (FinalPos <= Degree && FinalPos - Degree <= -0.1 && FinalPos - Degree > -359.9)
 			  {
 				  request = -0.5;
+				  Direction = 1;
 			  }
-			  if (FinalPos - Degree < 0.2 || FinalPos - Degree > -0.2)
+			  if (FinalPos >= Degree && FinalPos - Degree >= 0.1 && FinalPos - Degree < 359.9)
+			  {
+				  request = 0.5;
+				  Direction = 0;
+			  }
+			  if (FinalPos <= Degree && FinalPos - Degree > -359.8 && FinalPos - Degree <= -300)
+			  {
+				  request = 0.5;
+				  Direction = 0;
+			  }
+			  if (FinalPos >= Degree && FinalPos - Degree >= 300 && FinalPos - Degree < 359.8)
+			  {
+				  request = -0.5;
+				  Direction = 1;
+			  }
+
+			  if (FinalPos - Degree <= 0.1 && FinalPos - Degree >= -0.1)
 			  {
 				  request = 0;
-				  Vi = 1;
-			  }
-			  if (Vi == 0)
-			  {
-				  Trong1Vi = micros();
-			  }
-			  if (micros() - Trong1Vi > 500000 && Vi)
-			  {
+				  Direction = 2;
 				  Statee = Trong;
+			  }
+			  if (FinalPos - Degree >= 359.9 || FinalPos - Degree <= -359.9)
+			  {
+				  request = 0;
+				  Direction = 2;
+				  Statee = Trong;
+				  PWMPercent = 0;
 			  }
 			  if (micros() - TimestampPID > 1000)
 			  {
@@ -587,40 +530,29 @@ UARTResetStart(&UART2);
 				  PID() ;
 				  TimestampPID = micros() ;
 			  }
-
-			  //*********************
-//			  if (micros() - secondpidTS >= 1000)
-//			  {
-//				  SecondPID();
-//				  secondpidTS = micros();
-//			  }
-//
-//			  if (FinalPos - Degree < 0.3 && FinalPos - Degree > -0.3)
-//			  {
-//				  Vi = 1;
-//			  }
-//			  if (FinalPos - Degree >= 359.7 && FinalPos - Degree > -359.7)
-//			  {
-//				  Vi = 1;
-//			  }
-//			  if (Vi == 0)
-//			  {
-//				  Trong1Vi = micros();
-//			  }
-//			  if (micros() - Trong1Vi > 500000 && Vi)
-//			  {
-//				  Statee = Trong;
-//			  }
 			  break;
 		  case Trong:
-			request = 0;
-			PWMPercent = 0;
-			FinishedStation = 1;
-			StartMoving = 0;
-			Statee = InitPID;
-			Vi = 0;
-			effTimestamp = micros();
-			EndEffWrite();
+			  if (FinalPos - Degree <= 0.2 && FinalPos - Degree >= -0.2)
+			  {
+				  request = 0;
+					PWMPercent = 0;
+					FinishedStation = 1;
+					StartMoving = 0;
+					Statee = InitPID;
+					effTimestamp = micros();
+					EndEffWrite();
+			  }
+			  else if (FinalPos - Degree >= 359.8 || FinalPos - Degree <= -359.8)
+			  {
+				  Statee = YangMaiTrong;
+				  PIDinit();
+			  }
+			  else
+			  {
+				  PIDinit();
+				  Statee = YangMaiTrong;
+			  }
+
 			  break;
 		  }
 
@@ -982,8 +914,8 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void EndEffWrite()
 {
-//	if (hi2c1.State == HAL_I2C_STATE_READY && enable_eff)
-	if (hi2c1.State == HAL_I2C_STATE_READY)
+	if (hi2c1.State == HAL_I2C_STATE_READY && enable_eff)
+//	if (hi2c1.State == HAL_I2C_STATE_READY)
 	{
 		test ++;
 		HAL_Delay(500);
@@ -1100,6 +1032,7 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 	switch (State)
 	{
 	case Idle:
+		stateeee = 1;
 		UARTsuccess = 0;
 		UARTerror = 0;
 		if (DataInTest == 0b10010000)
@@ -1210,12 +1143,13 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 		}
 		break;
 	case Frame1:
+		stateeee = 2;
 		frame1 = dataIn;
 		checksumtest = CheckSumFunction(CheckSum, Frame, CollectedData);
 			if (frame1 == checksumtest)
 			{
 				UARTsuccess += 1;
-				if (Mode == 2 || Mode == 3 || Mode == 12 || Mode == 13 || Mode == 14)
+				if (Mode == 2 || Mode == 3 || Mode == 12 || Mode == 13)
 				{
 					WriteACK1();
 				}
@@ -1229,49 +1163,28 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 				if (Mode == 9)
 				{
 					//send current station**************************************************************************
-					if (FinishedTask)
-					{
-						WriteACK2();
-					}
-					else
-					{
-						WriteACK1();
-						uint8_t temp[] = {153,0,GoToStation[NextStation],CheckSumFunction(153, 2, GoToStation[NextStation])};
-						UARTTxWrite(&UART2, temp, 4) ;
-					}
+					WriteACK1();
+					uint8_t temp[] = {153,0,GoToStation[NextStation],CheckSumFunction(153, 2, GoToStation[NextStation])};
+					UARTTxWrite(&UART2, temp, 4) ;
 				}
 				if (Mode == 10) //Decimal 4 degree
 				{
-					if (FinishedTask)
-					{
-						WriteACK2();
-					}
-					else
-					{
-						WriteACK1();
-						CurrentAngle1 = (int8_t)(Degree * 10000 * 3.14159265 / 256 /180) ;
-						CurrentAngle2 = (int8_t)((int)(Degree* 10000 * 3.14159265 / 180) % 256) ;
-						uint8_t temp[] = {154,CurrentAngle1, CurrentAngle2,CheckSumFunction(154, 2, CurrentAngle1+CurrentAngle2)};
-						UARTTxWrite(&UART2, temp, 4);
-						n = 0;
-						//read Ack in while loop
-					}
+					WriteACK1();
+					int radThousand = (int)(Degree*10000*3.14159265/180);
+					CurrentAngle1 = (int8_t)(radThousand/256) ;
+					CurrentAngle2 = (int8_t)(radThousand%256) ;
+					uint8_t temp[] = {154,CurrentAngle1, CurrentAngle2,CheckSumFunction(154, 2, CurrentAngle1+CurrentAngle2)};
+					UARTTxWrite(&UART2, temp, 4);
+					n = 0;
 				}
 				if (Mode == 11) //error; send now speed and top speed
 				{
-					if (FinishedTask)
-					{
-						WriteACK2();
-					}
-					else
-					{
-						WriteACK1();
-						uint8_t temp[] = {155,0,(int8_t)VmaxReal * 255 / 10,CheckSumFunction(155, 2, (int8_t)VmaxReal * 255 / 10)};
-						UARTTxWrite(&UART2, temp, 4) ;
-						//send Vmax
-						n = 0;
-						//read Ack in while loop
-					}
+					WriteACK1();
+					uint8_t temp[] = {155,0,(int8_t)(VmaxReal * 255 / 10),CheckSumFunction(155, 2, (int8_t)(VmaxReal * 255 / 10))};
+					UARTTxWrite(&UART2, temp, 4) ;
+					//send Vmax
+					n = 0;
+					//read Ack in while loop
 
 				}
 				if (Mode == 14)
@@ -1290,14 +1203,17 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 		break;
 
 	case Frame2_1:
+		stateeee = 21;
 		CollectedData = dataIn;
 		State = Frame2_2;
 		break;
 	case Frame2_2:
+		stateeee = 22;
 		CollectedData2 = dataIn;
 		State = CheckSum2;
 		break;
 	case CheckSum2:
+		stateeee = 23;
 		frame2 = dataIn;
 		checksumtest = CheckSumFunction(CheckSum, Frame, CollectedData + CollectedData2);
 		if (frame2 == checksumtest)
@@ -1336,10 +1252,12 @@ void Protocal(int16_t dataIn,UARTStucrture *uart)
 
 		break;
 	case Frame3_n:
+		stateeee = 31;
 		n_Station = dataIn;
 		State = Frame3_station;
 		break;
 	case Frame3_station:
+		stateeee = 32;
 		break;
 	}
 }
@@ -1410,6 +1328,7 @@ void SetHome()
 			htim3.Instance->CNT = 0;
 			SetHomeFlag = 0;
 			StartSetHome = 0;
+			WriteACK1();
 		}
 	}
 }
