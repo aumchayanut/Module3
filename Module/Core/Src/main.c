@@ -105,18 +105,21 @@ uint8_t enable_eff = 0;
 uint16_t ChecksumFrame3 = 0;
 
 //PID
-int InitialPWM = 6500 ; //offset start pwm
+int InitialPWM = 7500 ; //offset start pwm
 uint64_t TimestampPID = 0 ; //PID period
 float SampleTime = 0.00001 ; //PID period
 float PreviousPWM = 0 ;
-float preErr1,preErr2,Propotional,Integrator,Differentiator,preVel,Tau ;
+float preErr1,preErr2 ;
 float DeltaU;
 float P = 0;
 float I = 0;
 float D = 0;
 float p = 47.8125;
+//float p = 70;
 float i = 12.8525;
+//float i = 8;
 float d = 10;
+//float d = 5;
 float SUM,PPreerror;
 float PP = 10;
 float II = 0.3;
@@ -156,7 +159,9 @@ uint8_t home = 0;
 
 //Read Encoder
 uint64_t TimestampEncoder = 0 ;//period of low pass read velocity
+uint64_t TimestampVelocity = 0 ;
 float EncoderVel = 0 ; //Velovity after low pass
+float EncoderAcc = 0;
 
 //N station
 uint8_t FinishedStation = 0;
@@ -167,11 +172,19 @@ uint64_t effTimestamp = 0;
 uint8_t openeff = 0;
 uint8_t GoToStation[255] = {0};
 
+//Check requirement
+uint64_t StartStationTime = 0;
+uint64_t EndStationTime = 0;
+float TimePerStation = 0;
+float VrequirementCheck = 0;
+float AccMax = 0;
+
 //General
 float request = 0 ; //Velocity want to be
 uint16_t PWMPercent = 0 ; //Motor PWM 0 - 10000
 uint64_t _micros = 0;
 float VelocityRPM ; //velocity RPM unit
+float AccelerationRad ;
 float Degree = 0 ; //Position Degree unit
 uint8_t Direction = 0 ; //0 CW - 1 CCW - 2 Stop
 uint8_t ButtonBuffer[2] = {0} ; //Blue button
@@ -203,8 +216,10 @@ static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 uint64_t micros() ;
 float EncoderVelocity_Update();
+float EncoderAcceleration_Update();
 void PWMgeneration() ;
 float Velocity() ;
+float Acceleration() ;
 void PID() ;
 void PIDinit() ;
 void Trajec();
@@ -318,9 +333,13 @@ UARTResetStart(&UART2);
 			  {
 				  NextStation++;
 				  StartMoving = 1;
+				  EndStationTime = micros();
+				  TimePerStation = (float)(EndStationTime-StartStationTime)/1000000;
 			  }
 			  else
 			  {
+				  EndStationTime = micros();
+				  TimePerStation = (float)(EndStationTime-StartStationTime)/1000000;
 				  StartMoving = 0;
 				  FinishedTask = 1;
 			  }
@@ -358,6 +377,16 @@ UARTResetStart(&UART2);
 	  else
 	  {
 		  VmaxReal = VelocityRPM;
+	  }
+	  if (VmaxReal > VrequirementCheck)
+	  {
+		  VrequirementCheck = VmaxReal;
+	  }
+//	  AccelerationRad = Acceleration();
+	  AccelerationRad = Acceleration();
+	  if(fabs(AccelerationRad) > AccMax)
+	  {
+		  AccMax = fabs(AccelerationRad);
 	  }
 ////*****************************************************
 //**********Set Home******************************
@@ -417,6 +446,9 @@ UARTResetStart(&UART2);
 		  switch(Statee)
 		  {
 		  case InitPID:
+			  StartStationTime = micros();
+			  VrequirementCheck = 0;
+			  AccMax = 0;
 			  PIDinit();
 			  Statee = Traj;
 			  break;
@@ -1295,10 +1327,23 @@ void SetHome()
 
 	if (SetHomeFlag == 0)
 	{
-		request = 5;
+		request = request+0.00005;
+		if (request >= 4)
+		{
+			request = 4;
+		}
 		Direction = 0;
 		if (sum > 0)
 		{
+			SetHomeFlag = 3;
+		}
+	}
+	if (SetHomeFlag == 3)
+	{
+		request = request - 0.00005;
+		if(request <= 0)
+		{
+			request = 0;
 			SetHomeFlag = 1;
 			SetHomeTimeStamp = micros();
 		}
@@ -1331,14 +1376,14 @@ void Trajec()
 {
 	float Vmax;
 	Vmax = VmaxRPM * 0.10472 ; //rad per sec
-	float Amax = 0.5 ;  //rad per sec square
+	float Amax = 0.4 ;  //rad per sec square
 	if (ST == 0)
 	{
 		StartTime = micros() ;
 		ST = 1 ;
 		StartPos = Degree * 3.14159 / 180.0 ; //rad
 	}
-	tau = (micros() - StartTime) / 1000000 ; //sec
+	tau = (float)(micros() - StartTime) / 1000000 ; //sec
 
 	Qi = StartPos ;
 	Qf = FinalPos * 3.14159 / 180.0 ;
@@ -1415,13 +1460,9 @@ void PIDinit()
 	preErr2 = 0 ;
 	PreviousPWM = 0 ;
 	PWMPercent = 0 ;
-	Propotional = 0 ;
-	Integrator = 0 ;
-	Differentiator = 0 ;
 	P = 0 ;
 	I = 0 ;
 	D = 0 ;
-	Tau = 0 ;
 }
 
 void PID()
@@ -1491,13 +1532,21 @@ void SecondPID()
 	PPreerror = error;
 }
 
-
+float Acceleration()
+{
+	if (micros() - TimestampVelocity >= 1000)
+	{
+		TimestampVelocity = micros();
+		EncoderAcc = (EncoderAcc * 499 + EncoderAcceleration_Update()) / 500.0 ;
+	}
+	return EncoderAcc;
+}
 float Velocity()
 {
 	  if (micros() - TimestampEncoder >= 100)
 	  {
 		  TimestampEncoder = micros();
-		  EncoderVel = (EncoderVel * 999 + EncoderVelocity_Update()) / 1000.0;
+		  EncoderVel = (EncoderVel * 499 + EncoderVelocity_Update()) / 500.0;
 	  }
 	  return EncoderVel * 60.0 / 2048.0; //pulse per sec to rpm
 }
@@ -1522,6 +1571,32 @@ void PWMgeneration()
 #define  HTIM_ENCODER htim3
 #define  MAX_SUBPOSITION_OVERFLOW 1024
 #define  MAX_ENCODER_PERIOD 2048
+
+float EncoderAcceleration_Update()
+{
+	//Save Last state
+	static float EncoderLastVelocity = 0;
+	static uint64_t EncoderLastTimestamp = 0;
+
+	//read data
+	float EncoderNowVelocity = VelocityRPM*	0.10472;
+	uint64_t EncoderNowTimestamp = micros();
+
+	float EncoderVelocityDiff;
+	uint64_t EncoderTimeDiff;
+
+	EncoderTimeDiff = EncoderNowTimestamp - EncoderLastTimestamp;
+	EncoderVelocityDiff = EncoderNowVelocity - EncoderLastVelocity;
+
+	//Update Position and time
+	EncoderLastVelocity = EncoderNowVelocity;
+	EncoderLastTimestamp = EncoderNowTimestamp;
+
+	//Calculate velocity
+	//EncoderTimeDiff is in uS
+	return (EncoderVelocityDiff * 1000000) / (float) EncoderTimeDiff;
+
+}
 
 float EncoderVelocity_Update()
 {
