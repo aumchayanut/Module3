@@ -311,15 +311,15 @@ UARTResetStart(&UART2);
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  Station[0] = 30;
-	  Station[1] = 90;
-	  Station[2] = 270;
-	  Station[3] = 275;
-	  Station[4] = 280;
-	  Station[5] = 360;
-	  Station[6] = 45;
-	  Station[7] = 100;
-	  Station[8] = 150;
+	  Station[0] = 80;
+	  Station[1] = 85;
+	  Station[2] = 90;
+	  Station[3] = 95;
+	  Station[4] = 260;
+	  Station[5] = 25;
+	  Station[6] = 115;
+	  Station[7] = 205;
+	  Station[8] = 295;
 	  Station[9] = 0;
 
 	  //*************When reach station********************
@@ -446,11 +446,23 @@ UARTResetStart(&UART2);
 		  switch(Statee)
 		  {
 		  case InitPID:
-			  StartStationTime = micros();
-			  VrequirementCheck = 0;
-			  AccMax = 0;
-			  PIDinit();
-			  Statee = Traj;
+			  if (FinalPos - Degree >= 10 || FinalPos - Degree <= -10)
+			  {
+				  StartStationTime = micros();
+				  VrequirementCheck = 0;
+				  AccMax = 0;
+				  PIDinit();
+				  Statee = Traj;
+			  }
+			  else
+			  {
+				  StartStationTime = micros();
+				  VrequirementCheck = 0;
+				  AccMax = 0;
+				  PIDinit();
+				  Statee = YangMaiTrong;
+			  }
+
 			  break;
 		  case Traj:
 			  //**************PID******************************
@@ -1364,7 +1376,7 @@ void SetHome()
 		if (sum > 0)
 		{
 			request = 0;
-			htim3.Instance->CNT = 0;
+			htim3.Instance->CNT = 1;
 			SetHomeFlag = 0;
 			StartSetHome = 0;
 		}
@@ -1376,7 +1388,8 @@ void Trajec()
 {
 	float Vmax;
 	Vmax = VmaxRPM * 0.10472 ; //rad per sec
-	float Amax = 0.4 ;  //rad per sec square
+//	Vmax = 11*0.10472;
+	float Amax = 0.5 ;  //rad per sec square
 	if (ST == 0)
 	{
 		StartTime = micros() ;
